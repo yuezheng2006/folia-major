@@ -48,11 +48,10 @@ http {
             set $folia_netease_upstream "${FOLIA_NETEASE_UPSTREAM}";
             rewrite ^/netease/?(.*)$ /$1 break;
             proxy_pass http://$folia_netease_upstream;
-            # Netease QR login returns several large Set-Cookie headers before they are hidden.
+            # Netease QR login returns several large Set-Cookie headers; keep them like Vercel.
             proxy_buffer_size 32k;
             proxy_buffers 8 32k;
             proxy_busy_buffers_size 64k;
-            proxy_hide_header Set-Cookie;
             proxy_set_header Host $host;
             proxy_set_header X-Forwarded-Host $host;
             proxy_set_header X-Forwarded-Proto $folia_forwarded_proto;
@@ -63,7 +62,8 @@ http {
             set $folia_kugou_upstream "${FOLIA_KUGOU_UPSTREAM}";
             rewrite ^/kugou/?(.*)$ /$1 break;
             proxy_pass http://$folia_kugou_upstream;
-            proxy_hide_header Set-Cookie;
+            proxy_buffer_size 16k;
+            proxy_buffers 8 16k;
             proxy_set_header Host $host;
             proxy_set_header X-Forwarded-Host $host;
             proxy_set_header X-Forwarded-Proto $folia_forwarded_proto;
@@ -74,7 +74,8 @@ http {
             set $folia_qq_upstream "${FOLIA_QQ_UPSTREAM}";
             rewrite ^/qq/?(.*)$ /$1 break;
             proxy_pass http://$folia_qq_upstream;
-            proxy_hide_header Set-Cookie;
+            proxy_buffer_size 16k;
+            proxy_buffers 8 16k;
             proxy_set_header Host $host;
             proxy_set_header X-Forwarded-Host $host;
             proxy_set_header X-Forwarded-Proto $folia_forwarded_proto;
