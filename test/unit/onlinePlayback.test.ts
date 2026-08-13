@@ -128,6 +128,31 @@ describe('online audio ReplayGain plumbing', () => {
         }
         expect(updatePrefetchedAudioUrlMock).toHaveBeenCalledWith(song, 'https://audio.test/song.mp3', 'high', undefined);
     });
+    it('returns a classified unavailable result when the provider has no URL', async () => {
+        sourceMock.mockResolvedValue(null);
+
+        const result = await loadOnlineSongAudioSource(song, 'high', null);
+
+        expect(result).toEqual({ kind: 'unavailable', reason: 'no-play-link' });
+    });
+
+    it('returns a classified unavailable result when the provider throws not-playable', async () => {
+        const { OnlineProviderError } = await import('@/types/onlineMusic');
+        sourceMock.mockRejectedValue(new OnlineProviderError('not-playable', '暂无播放链接', 'qq'));
+
+        const qqSong: SongResult = {
+            ...song,
+            sourceRef: {
+                kind: 'online',
+                providerId: 'qq',
+                mediaId: 'qq-mid',
+                providerData: { payPlay: 1 },
+            },
+        };
+        const result = await loadOnlineSongAudioSource(qqSong, 'high', null);
+
+        expect(result).toEqual({ kind: 'unavailable', reason: 'membership' });
+    });
 });
 
 describe('online QQ lyric candidate plumbing', () => {

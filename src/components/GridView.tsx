@@ -4,6 +4,7 @@ import { ChevronLeft, Disc, Download, Play, Plus, Loader2, Heart, ListPlus, Penc
 import { useTranslation } from 'react-i18next';
 import { SongResult, type LocalSong, type StatusMessage, Theme, type UnifiedSong } from '../types';
 import { getSongUnavailableLabel, isSongUnavailable } from '../services/onlineMusic/songAvailability';
+import { getSongListBadgeLabel } from '../services/onlineMusic/onlineUnavailableReason';
 import { getNavidromeConfig, navidromeApi } from '../services/navidromeService';
 import { formatSongName } from '../utils/songNameFormatter';
 import { getSizedCoverUrl } from '../utils/coverUrl';
@@ -184,9 +185,16 @@ export const PolaroidCard = React.memo<{
         isFocused = false,
     }) => {
         const isUnavailable = mode === 'tracks' && item.rawTrack ? isSongUnavailable(item.rawTrack) : false;
-        const unavailableTagText = (mode === 'tracks' && item.rawTrack)
+        const listBadgeText = (mode === 'tracks' && item.rawTrack)
+            ? getSongListBadgeLabel(item.rawTrack, {
+                unavailable: t('status.songUnavailableTag'),
+                membership: t('status.songMembershipTag'),
+            })
+            : null;
+        const unavailableTagText = isUnavailable && item.rawTrack
             ? getSongUnavailableLabel(item.rawTrack, t('status.songUnavailableTag'))
             : '';
+        const membershipTagText = !isUnavailable && listBadgeText ? listBadgeText : '';
         const trackAlbum = item.rawTrack?.album;
         const albumTargetId = resolveGridTrackAlbumTargetId(item.rawTrack);
         const canOpenAlbum = Boolean(
@@ -296,6 +304,13 @@ export const PolaroidCard = React.memo<{
                         <div className="absolute inset-0 bg-black/40 flex items-center justify-center p-2 text-center z-10">
                             <span className="text-[10px] bg-red-500/80 text-white font-bold px-2 py-1 rounded-full uppercase tracking-wider">
                                 {unavailableTagText || t('status.songUnavailableTag').toUpperCase()}
+                            </span>
+                        </div>
+                    )}
+                    {!isUnavailable && membershipTagText && (
+                        <div className="absolute left-2 top-2 z-10">
+                            <span className="text-[10px] bg-black/55 text-white font-medium px-2 py-0.5 rounded-full tracking-wide">
+                                {membershipTagText}
                             </span>
                         </div>
                     )}

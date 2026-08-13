@@ -3,6 +3,10 @@ import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import type { MotionValue } from 'framer-motion';
 import { applyOnlineAudioSourceMetadata, loadOnlineSongAudioSource, loadOnlineSongLyrics } from '../services/onlinePlayback';
 import { getSongReplacement, isSongUnavailable } from '../services/onlineMusic/songAvailability';
+import {
+    onlineUnavailablePromptKey,
+    onlineUnavailableStatusKey,
+} from '../services/onlineMusic/onlineUnavailableReason';
 import { getSongResourceCacheKey } from '../services/onlineMusic/resourceKeys';
 import { omni } from '../services/onlineMusic/omni';
 import { getCachedSongCoverUrl, hasCachedSongAudio } from '../services/onlineMusic/resourceCache';
@@ -544,11 +548,12 @@ export function usePlaybackQueueController({
             if (preloadedOnlineAudioResult.kind === 'unavailable') {
                 const nextSong = getNextPlayableQueueSong(queueContext, song);
                 const canSkip = Boolean(nextSong) && skipCount < MAX_UNAVAILABLE_AUTO_SKIP_COUNT;
+                const reason = preloadedOnlineAudioResult.reason;
 
                 setIsLyricsLoading(false);
 
                 if (canSkip && nextSong) {
-                    showTimedSkipPrompt('status.songUnavailablePrompt', () => {
+                    showTimedSkipPrompt(onlineUnavailablePromptKey(reason), () => {
                         if (playbackRequestIdRef.current !== playbackRequestId) return;
                         void playSong(nextSong, newQueue, isFmCall, {
                             ...options,
@@ -556,7 +561,7 @@ export function usePlaybackQueueController({
                         });
                     });
                 } else {
-                    setStatusMsg({ type: 'error', text: t('status.songUnavailable') });
+                    setStatusMsg({ type: 'error', text: t(onlineUnavailableStatusKey(reason)) });
                 }
                 return;
             }

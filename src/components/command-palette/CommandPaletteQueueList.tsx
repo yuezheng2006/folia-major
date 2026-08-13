@@ -103,6 +103,7 @@ const CommandPaletteQueueList: React.FC<CommandPaletteQueueListProps> = ({
             unavailable: t('status.songUnavailableTag'),
             artist: t('commandPalette.queueFacetArtist'),
             album: t('commandPalette.queueFacetAlbum'),
+            membership: t('status.songMembershipTag'),
         },
         matches,
         onActiveIndexChange,

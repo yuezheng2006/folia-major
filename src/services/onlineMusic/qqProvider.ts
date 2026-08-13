@@ -218,7 +218,12 @@ const getAudioSource = async (song: SongResult, quality: AudioQualityPreference)
         // `true` means the upstream answered normally but issued no stream for this account.
         upstreamRefusedPlayLink: sawEmptyPlayLink,
     });
-    return null;
+    // Empty purl with HTTP 200 is a stable refusal (membership / copyright), not a transient miss.
+    // Surface it as not-playable so UI can avoid the NetEase-style "taken down" copy.
+    if (sawEmptyPlayLink) {
+        throw new OnlineProviderError('not-playable', '暂无播放链接', 'qq');
+    }
+    throw new OnlineProviderError('unavailable', 'Failed to resolve QQ play URL', 'qq');
 };
 
 // Delegates to the existing QRC pipeline, which owns decryption, translation and romanization.

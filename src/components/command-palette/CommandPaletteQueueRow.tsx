@@ -1,7 +1,8 @@
 import React from 'react';
 import { ListEnd, ListPlus, Trash2 } from 'lucide-react';
 import type { RowComponentProps } from 'react-window';
-import { getSongUnavailableLabel, isSongUnavailable } from '../../services/onlineMusic/songAvailability';
+import { isSongUnavailable } from '../../services/onlineMusic/songAvailability';
+import { getSongListBadgeLabel } from '../../services/onlineMusic/onlineUnavailableReason';
 import { getSongArtistLabel } from '../../services/onlineMusic/songMetadata';
 import { getPlaybackSongKey } from '../../utils/appPlaybackGuards';
 import type { CommandPaletteMatch } from './types';
@@ -21,6 +22,7 @@ export type CommandPaletteQueueRowProps = {
         unavailable: string;
         artist: string;
         album: string;
+        membership: string;
     };
     matches: CommandPaletteMatch[];
     onActiveIndexChange: (index: number) => void;
@@ -56,6 +58,10 @@ const CommandPaletteQueueRow = ({
     const isSelected = index === activeIndex;
     const isPlaying = currentSongKey === getPlaybackSongKey(song);
     const unavailable = isSongUnavailable(song);
+    const listBadgeText = getSongListBadgeLabel(song, {
+        unavailable: labels.unavailable,
+        membership: labels.membership,
+    });
     const selectedClass = isDaylight ? 'bg-black/10' : 'bg-white/10';
     const hoverClass = isDaylight ? 'hover:bg-black/[0.05]' : 'hover:bg-white/[0.06]';
 
@@ -87,9 +93,9 @@ const CommandPaletteQueueRow = ({
                     <span className="min-w-0 flex-1">
                         <span className="flex items-center gap-2">
                             <span className="truncate text-sm font-medium">{song.name}</span>
-                            {unavailable && (
+                            {listBadgeText && (
                                 <span className="shrink-0 rounded-full border border-current/10 px-1.5 py-0.5 text-[9px] opacity-70">
-                                    {getSongUnavailableLabel(song, labels.unavailable)}
+                                    {listBadgeText}
                                 </span>
                             )}
                         </span>

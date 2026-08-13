@@ -121,6 +121,21 @@ export const normalizeQqSong = (raw: unknown): UnifiedSong => {
     const durationMs = Number(item.durationMs);
     const intervalSeconds = Number(pick(item, 'interval', 'duration'));
     const coverUrl = normalizeQqCoverUrl(pick(album, 'coverUrl', 'picUrl')) || getQqAlbumCoverUrl(albumMid);
+    // QQ liked / playlist rows expose pay flags under `pay`; empty getMusicPlay purl often
+    // correlates with pay_play / pay_month, so keep them for UI copy (not for hard-blocking).
+    const pay = record(item.pay);
+    const payPlayRaw = Number(
+        pick(pay, 'pay_play', 'payPlay')
+        ?? pick(item, 'pay_play', 'payPlay')
+        ?? pick(providerData, 'payPlay'),
+    );
+    const payMonthRaw = Number(
+        pick(pay, 'pay_month', 'payMonth')
+        ?? pick(item, 'pay_month', 'payMonth')
+        ?? pick(providerData, 'payMonth'),
+    );
+    const payPlay = Number.isFinite(payPlayRaw) && payPlayRaw > 0 ? payPlayRaw : undefined;
+    const payMonth = Number.isFinite(payMonthRaw) && payMonthRaw > 0 ? payMonthRaw : undefined;
 
     return {
         id: songId,
@@ -147,6 +162,8 @@ export const normalizeQqSong = (raw: unknown): UnifiedSong => {
                 ['songMid', songMid],
                 ['albumMid', albumMid],
                 ['mediaMid', mediaMid],
+                ['payPlay', payPlay],
+                ['payMonth', payMonth],
             ]),
         },
     };
