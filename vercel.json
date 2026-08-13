@@ -1,0 +1,42 @@
+{
+  "rewrites": [
+    {
+      "source": "/netease/:path*",
+      "destination": "/api/netease-proxy?path=/:path*"
+    },
+    {
+      "source": "/qq/:path*",
+      "destination": "/api/qq-proxy?path=/:path*"
+    },
+    {
+      "source": "/kugou/:path*",
+      "destination": "/api/kugou-proxy?path=/:path*"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/index.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/sw.js",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/runtime-config.js",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
+    }
+  ]
+}
