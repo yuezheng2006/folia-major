@@ -42,9 +42,12 @@ http {
             return 200 'window.__FOLIA_RUNTIME_CONFIG__={aiProvider:"${FOLIA_AI_PROVIDER}"};';
         }
 
+        # Variable proxy_pass keeps the full original URI unless we rewrite first.
+        # `set` must run before `rewrite ... break` (break skips later rewrite-module dirs).
         location /netease/ {
             set $folia_netease_upstream "${FOLIA_NETEASE_UPSTREAM}";
-            proxy_pass http://$folia_netease_upstream/;
+            rewrite ^/netease/?(.*)$ /$1 break;
+            proxy_pass http://$folia_netease_upstream;
             # Netease QR login returns several large Set-Cookie headers before they are hidden.
             proxy_buffer_size 32k;
             proxy_buffers 8 32k;
@@ -58,7 +61,8 @@ http {
 
         location /kugou/ {
             set $folia_kugou_upstream "${FOLIA_KUGOU_UPSTREAM}";
-            proxy_pass http://$folia_kugou_upstream/;
+            rewrite ^/kugou/?(.*)$ /$1 break;
+            proxy_pass http://$folia_kugou_upstream;
             proxy_hide_header Set-Cookie;
             proxy_set_header Host $host;
             proxy_set_header X-Forwarded-Host $host;
@@ -68,7 +72,8 @@ http {
 
         location /qq/ {
             set $folia_qq_upstream "${FOLIA_QQ_UPSTREAM}";
-            proxy_pass http://$folia_qq_upstream/;
+            rewrite ^/qq/?(.*)$ /$1 break;
+            proxy_pass http://$folia_qq_upstream;
             proxy_hide_header Set-Cookie;
             proxy_set_header Host $host;
             proxy_set_header X-Forwarded-Host $host;
