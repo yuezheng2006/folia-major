@@ -1,4 +1,4 @@
-FROM node:24-alpine AS builder
+FROM public.ecr.aws/docker/library/node:24-alpine AS builder
 
 LABEL "language"="nodejs"
 LABEL "framework"="vite"
@@ -9,7 +9,9 @@ ARG VCS_REF=local
 ARG STACK_VERSION=zeabur
 ARG REQUIRE_COMMIT_NAME=false
 COPY package.json package-lock.json ./
-RUN npm install
+RUN npm config set fetch-retries 5 \
+  && npm config set fetch-retry-maxtimeout 120000 \
+  && npm install
 
 COPY . .
 ENV VITE_NETEASE_API_BASE=/netease
@@ -25,13 +27,15 @@ ENV REQUIRE_COMMIT_NAME=${REQUIRE_COMMIT_NAME}
 RUN npm exec vite build
 RUN npm run build:vercel-api
 
-FROM node:24-alpine AS api-deps
+FROM public.ecr.aws/docker/library/node:24-alpine AS api-deps
 
 WORKDIR /app
 COPY deploy/docker/backend/package.json deploy/docker/backend/package-lock.json ./
-RUN npm install --omit=dev
+RUN npm config set fetch-retries 5 \
+  && npm config set fetch-retry-maxtimeout 120000 \
+  && npm install --omit=dev
 
-FROM nginx:1.29-alpine AS runner
+FROM public.ecr.aws/docker/library/nginx:1.29-alpine AS runner
 
 LABEL "language"="nodejs"
 LABEL "framework"="vite"
