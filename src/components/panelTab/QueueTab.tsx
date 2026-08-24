@@ -5,7 +5,8 @@ import { ListEnd, ListPlus, Shuffle, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { SongResult } from '../../types';
 import TextInputDialog from '../shared/TextInputDialog';
-import { getSongUnavailableLabel, isSongUnavailable } from '../../services/onlineMusic/songAvailability';
+import { isSongUnavailable } from '../../services/onlineMusic/songAvailability';
+import { getSongListBadgeLabel } from '../../services/onlineMusic/onlineUnavailableReason';
 import { getSongArtistLabel } from '../../services/onlineMusic/songMetadata';
 import { getPlaybackSongKey } from '../../utils/appPlaybackGuards';
 
@@ -36,6 +37,7 @@ type QueueRowProps = {
     isDaylight: boolean;
     labels: {
         unavailable: string;
+        membership: string;
         playNext: string;
         moveToEnd: string;
         remove: string;
@@ -59,7 +61,10 @@ const QueueRow = ({
     const song = playQueue[index];
     const isActive = currentSongKey === getPlaybackSongKey(song);
     const isUnavailable = isSongUnavailable(song);
-    const unavailableTagText = getSongUnavailableLabel(song, labels.unavailable);
+    const listBadgeText = getSongListBadgeLabel(song, {
+        unavailable: labels.unavailable,
+        membership: labels.membership,
+    });
     const activeRowClass = isDaylight ? 'bg-black/[0.08]' : 'bg-white/20';
     const activeMarkerClass = isDaylight ? 'bg-zinc-700' : 'bg-white';
     const hoverRowClass = isDaylight ? 'hover:bg-black/[0.04]' : 'hover:bg-white/5';
@@ -77,9 +82,9 @@ const QueueRow = ({
             <div className="min-w-0 flex-1">
                 <div className="text-xs font-medium truncate">
                     {song.name}
-                    {isUnavailable && (
+                    {listBadgeText && (
                         <span className={`ml-2 inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium align-middle ${isDaylight ? 'border-black/8 bg-black/[0.04] text-zinc-600' : 'border-white/10 bg-white/[0.05] text-zinc-300'}`}>
-                            {unavailableTagText}
+                            {listBadgeText}
                         </span>
                     )}
                 </div>
@@ -159,6 +164,7 @@ const QueueTab: React.FC<QueueTabProps> = ({
         isDaylight,
         labels: {
             unavailable: t('status.songUnavailableTag'),
+            membership: t('status.songMembershipTag'),
             playNext: t('queue.playNext'),
             moveToEnd: t('queue.moveToEnd'),
             remove: t('queue.remove'),

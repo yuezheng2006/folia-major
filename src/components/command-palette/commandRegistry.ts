@@ -1,4 +1,5 @@
 import { PlayerState, type HomeViewTab, type ReplayGainMode, type SongResult, type VisualizerMode, type VisualizerBackgroundMode, type MonetBackgroundTuning } from '../../types';
+import i18n from '../../i18n/config';
 import type { AppLanguagePreference } from '../../i18n/config';
 import type { PanelTab } from '../UnifiedPanel';
 import { syncNow } from '../../services/sync/syncCoordinator';
@@ -11,12 +12,26 @@ import type {
 } from './types';
 import type { SearchSource } from '../../stores/useSearchNavigationStore';
 import { getProviderSongMetadata } from '../../services/onlineMusic/songMetadata';
-import { ListMusic, Pause, Play, Repeat, Search, Shuffle, SkipBack, SkipForward } from 'lucide-react';
+import { buildObsCustomCss } from '../../utils/obsCustomCss';
+import type { AudioEqualizerModeId } from '../../utils/audioEqualizer';
+import { hasUploadedObsAsset } from '../../utils/visualSettingsConfig';
+import { ListMusic, ListX, Pause, Play, Repeat, Search, Shuffle, SkipBack, SkipForward, Volume2 } from 'lucide-react';
+import { buildQueueSearchIndex, evaluateQueueSearch, type QueueSearchEvaluation } from './queueSearch';
 
 // src/components/command-palette/commandRegistry.ts
 // Defines command palette entries and the lightweight matching used for autocomplete.
 
 const MAX_COMMAND_MATCHES = 10;
+const MATCH_QUALITY = {
+    contains: 1,
+    prefix: 2,
+    input: 3,
+    exact: 4,
+} as const;
+
+type RankedCommandPaletteMatch = CommandPaletteMatch & {
+    matchQuality: number;
+};
 
 const normalize = (value: string) => value.trim().toLowerCase().replace(/\s+/g, ' ');
 
@@ -25,15 +40,6 @@ const getSongArtistLabel = (song: SongResult) => {
 };
 
 const getSongAlbumLabel = (song: SongResult) => getProviderSongMetadata(song).album?.name || '';
-
-const buildQueueSearchText = (song: SongResult, index: number) => [
-    String(index + 1),
-    song.name,
-    getSongArtistLabel(song),
-    getSongAlbumLabel(song),
-    ...getProviderSongMetadata(song).aliases,
-    ...getProviderSongMetadata(song).translatedNames,
-].filter(Boolean).join(' ');
 
 const buildQueueSongDescription = (song: SongResult, index: number, context: CommandPaletteContext) => {
     const metadata = [getSongArtistLabel(song), getSongAlbumLabel(song)].filter(Boolean).join(' · ');
@@ -134,7 +140,7 @@ const createQueueSearchCommand = (): CommandPaletteCommand => ({
     description: 'Search the current play queue',
     keywords: ['queue', '播放队列', '队列搜索', 'duilie', 'duiliesousuo', 'dl', 'dlss'],
     icon: ListMusic,
-    placeholder: '输入歌曲名 / 艺术家 / 索引',
+    placeholder: i18n.t('commandPalette.previewQueueSearchEmpty'),
     requiresInput: true,
     getPreview: (input, context) => {
         const trimmedInput = input.trim();
@@ -145,6 +151,50 @@ const createQueueSearchCommand = (): CommandPaletteCommand => ({
             .replace('{{query}}', trimmedInput);
     },
     execute: () => false,
+});
+
+const parseVolumePercent = (input: string) => {
+    const trimmedInput = input.trim();
+    if (!trimmedInput) {
+        return null;
+    }
+    const value = Number(trimmedInput);
+    return Number.isFinite(value) && value >= 0 && value <= 100 ? value : null;
+};
+
+const createVolumeCommand = (): CommandPaletteCommand => ({
+    id: 'playback-volume',
+    group: 'playback',
+    title: 'Volume',
+    description: 'Adjust playback volume',
+    keywords: ['volume', 'volume slider', '音量', '音量条', 'yinliang', 'yinliangtiao', 'yl', 'ylt'],
+    icon: Volume2,
+    placeholder: i18n.t('commandPalette.volumeInputPlaceholder'),
+    requiresInput: true,
+    getInitialInput: context => String(Math.round(context.volume * 100)),
+    getPreview: (input, context) => {
+        if (!input.trim()) {
+            return context.t('commandPalette.volumeCurrent', 'Current volume: {{value}}%')
+                .replace('{{value}}', String(Math.round(context.volume * 100)));
+        }
+
+        const value = parseVolumePercent(input);
+        if (value === null) {
+            return context.t('commandPalette.volumeInvalid', 'Enter a number from 0 to 100');
+        }
+
+        return context.t('commandPalette.volumeSetPreview', 'Set volume to {{value}}%')
+            .replace('{{value}}', String(value));
+    },
+    execute: (input, context) => {
+        const value = parseVolumePercent(input);
+        if (value === null) {
+            return false;
+        }
+
+        context.setVolume(value / 100);
+        return true;
+    },
 });
 
 const createSettingsCommand = (
@@ -197,6 +247,24 @@ const createReplayGainCommand = (
     keywords,
     execute: (_input, context) => {
         context.onReplayGainModeChange(mode);
+        return true;
+    },
+});
+
+// Applies a built-in sound preset or a saved custom slot (EQ curve plus effect chain) without opening the dialog.
+const createSoundPresetCommand = (
+    presetId: AudioEqualizerModeId,
+    title: string,
+    description: string,
+    keywords: string[],
+): CommandPaletteCommand => ({
+    id: `playback-sound-preset-${presetId}`,
+    group: 'playback',
+    title,
+    description,
+    keywords: [...keywords, 'sound preset', 'audio preset', '音效预设', 'yinxiaoyushe', 'yxys'],
+    execute: (_input, context) => {
+        context.applyAudioSoundPreset(presetId);
         return true;
     },
 });
@@ -262,6 +330,7 @@ export const COMMAND_PALETTE_COMMANDS: CommandPaletteCommand[] = [
     createSearchCommand('search-navidrome', 'Search Navidrome songs', 'Search Navidrome library', ['navi', 'navidrome', 'search navidrome', '导航', '服务器', 'fuwuqi', 'fwq'], () => 'navidrome'),
     createSearchCommand('search-netease', 'Search NetEase songs', 'Search NetEase Cloud Music', ['netease', 'cloud', 'search netease', '网易云', '网抑云', 'wangyiyun', 'wyy'], () => 'netease'),
     createQueueSearchCommand(),
+    createVolumeCommand(),
 
     createSettingsCommand('settings-help', 'Open Help', 'Open help and shortcuts', ['help', '帮助', 'bangzhu', 'bz'], 'help'),
     {
@@ -285,9 +354,9 @@ export const COMMAND_PALETTE_COMMANDS: CommandPaletteCommand[] = [
     {
         id: 'playback-equalizer',
         group: 'playback',
-        title: 'Audio equalizer',
-        description: 'Open the ten-band audio equalizer',
-        keywords: ['equalizer', 'audio equalizer', 'eq', '10 band eq', '均衡器', '音频均衡器', '十段均衡器', 'junhengqi', 'yinpinjunhengqi', 'jhh', 'ypjhh'],
+        title: 'Audio effects',
+        description: 'Open the equalizer and effect chain',
+        keywords: ['equalizer', 'audio equalizer', 'eq', '10 band eq', 'audio effects', 'effect chain', '均衡器', '音频均衡器', '十段均衡器', '音效', '效果器', 'junhengqi', 'yinpinjunhengqi', 'yinxiao', 'xiaoguoqi', 'jhh', 'ypjhh', 'yx', 'xgq'],
         execute: (_input, context) => {
             context.setPanelTab('controls');
             context.setIsPanelOpen(true);
@@ -295,6 +364,14 @@ export const COMMAND_PALETTE_COMMANDS: CommandPaletteCommand[] = [
             return true;
         },
     },
+    createSoundPresetCommand('flat', 'Sound: Level', 'Clear the equalizer and every effect', ['flat', 'reset audio effects', '水平', '关闭音效', 'shuiping', 'guanbiyinxiao', 'sp', 'gbyx']),
+    createSoundPresetCommand('lofi', 'Sound: Lo-Fi', 'Filtered, crushed and wobbly with vinyl noise', ['lofi', 'lo-fi', 'low fidelity', '低保真', 'dibaozhen', 'dbz']),
+    createSoundPresetCommand('radio', 'Sound: Radio', 'Narrow band, nearly mono broadcast tone', ['radio', 'am radio', 'telephone', '收音机', '广播', 'shouyinji', 'guangbo', 'syj', 'gb']),
+    createSoundPresetCommand('hall', 'Sound: Hall', 'Wide stereo image with reverb space', ['hall', 'reverb', 'space', '大厅', '混响', '空间', 'daating', 'hunxiang', 'dt', 'hx']),
+    createSoundPresetCommand('vocal', 'Sound: Vocal', 'Lift the voice range and tighten dynamics', ['vocal', 'voice', '人声', 'rensheng', 'rs']),
+    createSoundPresetCommand('bass', 'Sound: Bass boost', 'Heavier low end with extra punch', ['bass boost', 'bass', '低音增强', '重低音', 'diyinzengqiang', 'zhongdiyin', 'dyzq', 'zdy']),
+    createSoundPresetCommand('custom1', 'Sound: Custom 1', 'Apply the first saved custom sound', ['custom 1', 'custom sound 1', '自定义 1', '自定义音效1', 'zidingyi1', 'zdy1']),
+    createSoundPresetCommand('custom2', 'Sound: Custom 2', 'Apply the second saved custom sound', ['custom 2', 'custom sound 2', '自定义 2', '自定义音效2', 'zidingyi2', 'zdy2']),
     createSettingsCommand('settings-local-lyrics-priority', 'Local song lyrics priority', 'Choose whether local songs prefer local or online lyrics', ['local lyrics priority', 'online lyrics first', 'local song lyrics', '本地歌曲歌词优先级', '在线优先', '本地歌词', 'bendigeciyouxianji', 'zaixianyouxian', 'bdgcyxj', 'zxyx'], 'options', 'playback'),
     createSettingsCommand('settings-integration', 'Integration settings', 'Open Stage, Now Playing, and Navidrome settings', ['integration', 'stage', 'now playing', 'navidrome settings', '集成', '连接', 'jicheng', 'lianjie', 'jc', 'lj'], 'options', 'integration'),
     createSettingsCommand('settings-discord-presence', 'Discord playback status', 'Open Discord Rich Presence settings', ['discord', 'rich presence', 'discord presence', 'playing status', '播放状态', 'discord状态', 'discordzhuangtai', 'bofangzhuangtai', 'dc', 'zt'], 'options', 'integration'),
@@ -319,6 +396,40 @@ export const COMMAND_PALETTE_COMMANDS: CommandPaletteCommand[] = [
                         : context.t('options.lyricApiEnableFailed', 'Failed to start the Lyrics API')
                     : context.t('options.lyricApiDisabledStatus', 'Lyrics API disabled'),
             });
+            return true;
+        },
+    },
+    {
+        id: 'settings-obs-copy-css',
+        group: 'settings',
+        title: 'Copy OBS CSS',
+        description: 'Copy the OBS Browser Source Custom CSS carrying uploaded background / portrait / Cappella assets',
+        keywords: ['obs css', 'copy obs css', 'obs custom css', 'obs assets', 'browser source css', '复制 obs css', 'obs 自定义 css', 'obs 资产', 'fuzhiobscss', 'obszidingyicss', 'obszichan', 'fzobscss', 'obszdycss', 'obszc'],
+        execute: async (_input, context) => {
+            if (!hasUploadedObsAsset()) {
+                context.setStatusMsg({
+                    type: 'info',
+                    text: context.t('commandPalette.obsCssNoAsset', 'No uploaded OBS assets are in use. Upload a custom background, portrait, emoji, or avatar first.'),
+                });
+                return true;
+            }
+            try {
+                const result = await buildObsCustomCss();
+                if (!result) {
+                    context.setStatusMsg({ type: 'error', text: context.t('status.copyFailed', 'Copy failed') });
+                    return true;
+                }
+                await navigator.clipboard.writeText(result.css);
+                const hintText = result.degradedGifCount > 0
+                    ? context
+                        .t('options.obsCssCopiedHintDegraded', 'CSS copied; {{count}} GIF asset(s) copied as static frames due to size. Paste it into OBS Browser Source -> Custom CSS.')
+                        .replace('{{count}}', String(result.degradedGifCount))
+                    : context.t('options.obsCssCopiedHint', 'CSS copied; paste it into OBS Browser Source -> Custom CSS.');
+                context.setStatusMsg({ type: 'info', text: hintText });
+            } catch (err) {
+                console.error('Failed to copy OBS CSS:', err);
+                context.setStatusMsg({ type: 'error', text: context.t('status.copyFailed', 'Copy failed') });
+            }
             return true;
         },
     },
@@ -366,9 +477,22 @@ export const COMMAND_PALETTE_COMMANDS: CommandPaletteCommand[] = [
             return true;
         },
     },
+    createSettingsCommand('settings-wallpaper-mode', 'Wallpaper mode settings', 'Open wallpaper mode settings', ['wallpaper mode', 'desktop wallpaper', 'lyrics wallpaper', '壁纸模式', '桌面壁纸', '歌词壁纸', 'bizhimoshi', 'zhuomianbizhi', 'gecibizhi', 'bzms', 'zmbz', 'gcbz'], 'options', 'desktop'),
+    {
+        id: 'desktop-toggle-wallpaper-mode',
+        group: 'settings',
+        title: 'Toggle wallpaper mode',
+        description: 'Turn the app into a desktop lyrics wallpaper',
+        keywords: ['wallpaper mode', 'desktop wallpaper', 'lyrics wallpaper', '壁纸模式', '桌面壁纸', '歌词壁纸', 'bizhimoshi', 'zhuomianbizhi', 'gecibizhi', 'bzms', 'zmbz', 'gcbz'],
+        execute: (_input, context) => {
+            context.toggleWallpaperMode();
+            return true;
+        },
+    },
     createSettingsCommand('settings-lab', 'Lab settings', 'Open experimental settings', ['lab', 'experimental', '实验', '实验室', 'shiyan', 'shiyanshi', 'sy', 'sys'], 'options', 'lab'),
     createSettingsCommand('settings-visualizer', 'Visualizer settings', 'Open lyrics animation workbench', ['visualizer settings', 'visualizer workbench', '可视化', '歌词动画', 'keshihua', 'gecidonghua', 'ksh', 'gcdh', 'donghua'], 'options', 'visualizer'),
     createSettingsCommand('settings-theme-park', 'Color', 'Open theme editor', ['color', 'theme park', 'theme', '配色', '主题', '主题公园', 'peise', 'zhuti', 'zhutigongyuan', 'ps', 'zt', 'ztgy'], 'options', 'themePark'),
+    createSettingsCommand('settings-global-lyric-offset', 'Global timing offset', 'Calibrate lyric timing against Bluetooth or device audio latency', ['global timing offset', 'lyric delay', 'audio latency', 'bluetooth delay', 'sync lyrics', '全局时间偏移', '歌词延迟', '音画同步', '蓝牙延迟', 'quanjushijianpianyi', 'geciyanchi', 'yinhuatongbu', 'lanyayanchi', 'qjsjpy', 'gcyc', 'yhtb', 'lyyc'], 'options', 'globalLyricOffset'),
     createSettingsCommand('settings-lyric-filter', 'Lyric filter', 'Open lyric filter settings', ['lyric filter', 'lyrics filter', '歌词过滤', '过滤', 'geciguolv', 'guolv', 'gcgl', 'gl'], 'options', 'lyricFilter'),
 
     {
@@ -492,6 +616,21 @@ export const COMMAND_PALETTE_COMMANDS: CommandPaletteCommand[] = [
         },
     },
     {
+        id: 'playback-clear-queue',
+        group: 'playback',
+        title: 'Clear queue',
+        description: 'Remove all songs from the current play queue',
+        keywords: ['clear queue', 'empty queue', 'clear playlist', 'remove all songs', '清空队列', '清空播放队列', '清除队列', 'qingkongduilie', 'qingkongbofangduilie', 'qingchuduilie', 'qkdl', 'qcdl'],
+        icon: ListX,
+        execute: (_input, context) => {
+            if (context.playQueue.length === 0) {
+                return false;
+            }
+            context.clearQueue();
+            return true;
+        },
+    },
+    {
         id: 'theme-generate-current',
         group: 'settings',
         title: 'Generate AI theme',
@@ -502,6 +641,34 @@ export const COMMAND_PALETTE_COMMANDS: CommandPaletteCommand[] = [
                 return false;
             }
             context.generateAITheme();
+            return true;
+        },
+    },
+    {
+        id: 'theme-source-ai',
+        group: 'settings',
+        title: 'Theme source: AI inference',
+        description: 'Generate song themes by having AI read the lyrics',
+        keywords: ['theme source ai', 'ai theme source', 'theme generation source', '主题来源AI', '主题生成来源', 'AI推断', 'zhutilaiyuan', 'zhutishengchenglaiyuan', 'aituiduan', 'ztly', 'ztsclly', 'aitd'],
+        execute: (_input, context) => {
+            if (context.themeGenerationSource === 'ai') {
+                return false;
+            }
+            context.setThemeGenerationSource('ai');
+            return true;
+        },
+    },
+    {
+        id: 'theme-source-cover',
+        group: 'settings',
+        title: 'Theme source: cover colors',
+        description: 'Generate song themes from the cover artwork palette',
+        keywords: ['theme source cover', 'cover theme source', 'cover colors', 'theme generation source', '主题来源封面', '封面取色', '主题生成来源', 'fengmianqvse', 'fengmianquse', 'zhutilaiyuan', 'ztlyfm', 'fmqs'],
+        execute: (_input, context) => {
+            if (context.themeGenerationSource === 'cover') {
+                return false;
+            }
+            context.setThemeGenerationSource('cover');
             return true;
         },
     },
@@ -528,6 +695,7 @@ export const COMMAND_PALETTE_COMMANDS: CommandPaletteCommand[] = [
         execute: (_input, context) => context.runAutoMatchBestLyric(),
     },
 
+    createVisualizerCommand('still', 'Visualizer: Still', 'Switch to the static low-resource visualizer', ['visualizer still', 'still', 'static', 'low resource', '静止', '静态', '低占用', 'jingzhi', 'jingtai', 'jz']),
     createVisualizerCommand('classic', 'Visualizer: Luminous', 'Switch to classic visualizer', ['visualizer classic', 'classic', '流光', 'liuguang', 'lg']),
     createVisualizerCommand('cadenza', 'Visualizer: Mindscape', 'Switch to cadenza visualizer', ['visualizer cadenza', 'cadenza', 'mindscape', '心象', 'xinxiang', 'xx']),
     createVisualizerCommand('partita', 'Visualizer: Partita', 'Switch to partita visualizer', ['visualizer partita', 'partita', '云阶', 'yunjie', 'yj']),
@@ -539,6 +707,7 @@ export const COMMAND_PALETTE_COMMANDS: CommandPaletteCommand[] = [
     createVisualizerCommand('diorama', 'Visualizer: Diorama', 'Switch to Diorama visualizer', ['visualizer diorama', 'diorama', '镜台', 'jingtai', 'jt', '切换到可视化：镜台', '切换到可视化镜台']),
     createVisualizerCommand('pendolo', 'Visualizer: Pendolo', 'Switch to Pendolo visualizer', ['visualizer pendolo', 'pendolo', '擒纵', '摆轮', 'qinzong', 'bailun', 'pd', '切换到可视化：擒纵', '切换到可视化擒纵']),
     createVisualizerCommand('sonnet', 'Visualizer: Sonnet', 'Switch to Sonnet visualizer', ['visualizer sonnet', 'sonnet', '商籁', 'shanglai', 'sl', '文字 pv', 'mg pv', 'vocaloid']),
+    createVisualizerCommand('tempera', 'Visualizer: Tempera', 'Switch to Tempera visualizer', ['visualizer tempera', 'tempera', '凝彩', 'dancai', 'dc', '色块 pv', 'block pv']),
     {
         id: 'desktop-toggle-remote-control',
         group: 'navigation',
@@ -716,6 +885,17 @@ export const COMMAND_PALETTE_COMMANDS: CommandPaletteCommand[] = [
         },
     },
     {
+        id: 'settings-toggle-track-switch-buttons',
+        group: 'settings',
+        title: 'Always show track switch arrows',
+        description: 'Toggle whether the progress bar track switch arrows stay visible beside the title',
+        keywords: ['always show track switch arrows', 'track switch buttons', 'previous next arrows', 'progress bar arrows', 'song switch buttons', '切歌箭头', '切换箭头', '始终显示切歌按钮', '进度条切歌按钮', '上一首下一首按钮', 'qiege jiantou', 'qiehuan jiantou', 'jinduting qiege', 'qgjt', 'qhjt', 'sysqgan'],
+        execute: (_input, context) => {
+            context.toggleAlwaysShowTrackSwitchButtons();
+            return true;
+        },
+    },
+    {
         id: 'settings-toggle-main-window-titlebar',
         group: 'settings',
         title: 'Always show window control buttons',
@@ -845,6 +1025,14 @@ export const getAvailableCommandPaletteCommands = (context?: CommandPaletteConte
         }
     }
 
+    // Wallpaper mode is a Linux-only desktop feature; never offer it on web or other platforms.
+    if (command.id === 'settings-wallpaper-mode' || command.id === 'desktop-toggle-wallpaper-mode') {
+        const isLinuxElectron = typeof window !== 'undefined' && (window as any).electron?.platform === 'linux';
+        if (!isLinuxElectron) {
+            return false;
+        }
+    }
+
     if (command.id === 'desktop-toggle-voice-input-pause') {
         const isElectron = typeof window !== 'undefined' && Boolean((window as any).electron);
         if (!isElectron || !context?.voiceInputPauseSupported) {
@@ -856,8 +1044,21 @@ export const getAvailableCommandPaletteCommands = (context?: CommandPaletteConte
         return context ? context.canGenerateAITheme && !context.isGeneratingTheme : true;
     }
 
+    if (command.id === 'playback-clear-queue') {
+        return context ? context.playQueue.length > 0 : true;
+    }
+
     if (command.id === 'theme-quick-editor') {
         return context ? context.canOpenThemeQuickEditor : true;
+    }
+
+    // Only offer the source the user is not already on.
+    if (command.id === 'theme-source-ai') {
+        return context ? context.themeGenerationSource !== 'ai' : true;
+    }
+
+    if (command.id === 'theme-source-cover') {
+        return context ? context.themeGenerationSource !== 'cover' : true;
     }
 
     if (command.group === 'search' && command.id !== 'search-current' && context) {
@@ -867,37 +1068,24 @@ export const getAvailableCommandPaletteCommands = (context?: CommandPaletteConte
     return true;
 });
 
-export const getQueueSongMatches = (query: string, context: CommandPaletteContext): CommandPaletteMatch[] => {
-    const normalizedQuery = normalize(query);
+export const getQueueSongMatchesFromEvaluation = (
+    evaluation: QueueSearchEvaluation,
+    query: string,
+    context: CommandPaletteContext,
+): CommandPaletteMatch[] => evaluation.matches.map(match => ({
+    command: createQueueSongCommand(match.entry.song, match.entry.queueIndex, context),
+    score: match.score,
+    input: query,
+    queueReasons: match.reasons,
+}));
 
-    if (!normalizedQuery) {
-        return context.playQueue.map((song, index) => ({
-            command: createQueueSongCommand(song, index, context),
-            score: 100 - index,
-            input: '',
-        }));
-    }
-
-    return context.playQueue
-        .map((song, index) => {
-            const normalizedSearchText = normalize(buildQueueSearchText(song, index));
-            if (!normalizedSearchText.includes(normalizedQuery)) {
-                return null;
-            }
-
-            const startsWithQuery = normalizedSearchText.startsWith(normalizedQuery)
-                || normalize(song.name).startsWith(normalizedQuery)
-                || String(index + 1).startsWith(normalizedQuery);
-
-            return {
-                command: createQueueSongCommand(song, index, context),
-                score: startsWithQuery ? 120 - index : 80 - index,
-                input: query,
-            };
-        })
-        .filter((match): match is CommandPaletteMatch => Boolean(match))
-        .sort((a, b) => b.score - a.score);
-};
+export const getQueueSongMatches = (query: string, context: CommandPaletteContext): CommandPaletteMatch[] => (
+    getQueueSongMatchesFromEvaluation(
+        evaluateQueueSearch(buildQueueSearchIndex(context.playQueue), context.currentSong, query),
+        query,
+        context,
+    )
+);
 
 const createQueueSongCommand = (
     song: SongResult,
@@ -941,29 +1129,55 @@ export const getCommandPaletteMatches = (
         }));
     }
 
+    const recentCommandRanks = new Map<string, number>();
+    recentCommandIds.forEach((commandId, index) => {
+        if (!recentCommandRanks.has(commandId)) {
+            recentCommandRanks.set(commandId, index);
+        }
+    });
+
     const matches = filteredCommands
         .map(command => {
             let bestScore = 0;
             let bestInput = '';
+            let matchQuality = 0;
 
             for (const keyword of command.keywords) {
                 const normalizedKeyword = normalize(keyword);
                 if (normalizedQuery === normalizedKeyword) {
                     bestScore = Math.max(bestScore, 120);
+                    matchQuality = Math.max(matchQuality, MATCH_QUALITY.exact);
                 } else if (normalizedKeyword.startsWith(normalizedQuery)) {
                     bestScore = Math.max(bestScore, 100 - normalizedKeyword.length);
+                    matchQuality = Math.max(matchQuality, MATCH_QUALITY.prefix);
                 } else if (normalizedQuery.startsWith(`${normalizedKeyword} `)) {
                     bestScore = Math.max(bestScore, 90 + normalizedKeyword.length + (command.requiresInput ? 20 : 0));
                     bestInput = query.trim().slice(keyword.length).trim();
+                    matchQuality = Math.max(matchQuality, MATCH_QUALITY.input);
                 } else if (normalizedKeyword.includes(normalizedQuery)) {
                     bestScore = Math.max(bestScore, 60 - normalizedKeyword.indexOf(normalizedQuery));
+                    matchQuality = Math.max(matchQuality, MATCH_QUALITY.contains);
                 }
             }
 
-            return bestScore > 0 ? { command, score: bestScore, input: bestInput } : null;
+            return bestScore > 0 ? { command, score: bestScore, input: bestInput, matchQuality } : null;
         })
-        .filter((match): match is CommandPaletteMatch => Boolean(match))
-        .sort((a, b) => b.score - a.score || a.command.title.localeCompare(b.command.title));
+        .filter((match): match is RankedCommandPaletteMatch => Boolean(match))
+        .sort((a, b) => {
+            if (a.matchQuality !== b.matchQuality) {
+                return b.matchQuality - a.matchQuality;
+            }
+
+            const aRecentRank = recentCommandRanks.get(a.command.id);
+            const bRecentRank = recentCommandRanks.get(b.command.id);
+            if (aRecentRank !== undefined || bRecentRank !== undefined) {
+                if (aRecentRank === undefined) return 1;
+                if (bRecentRank === undefined) return -1;
+                if (aRecentRank !== bRecentRank) return aRecentRank - bRecentRank;
+            }
+
+            return b.score - a.score || a.command.title.localeCompare(b.command.title);
+        });
 
     return matches.slice(0, MAX_COMMAND_MATCHES);
 };

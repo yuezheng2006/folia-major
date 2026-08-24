@@ -1,5 +1,6 @@
 import md5 from 'blueimp-md5';
 import { OnlineProviderError } from '../../types/onlineMusic';
+import { fetchWithRetry } from './fetchWithRetry';
 import { readProviderSessionValue, removeProviderSessionValue, writeProviderSessionValue } from './providerStorage';
 
 // src/services/onlineMusic/kugouTransport.ts
@@ -246,7 +247,7 @@ export const requestKugou = async <T = unknown>(operation: KugouOperation, param
         if (cookie) query.set('cookie', cookie);
         query.set('timestamp', String(Date.now()));
 
-        const response = await fetch(`${base}${ENDPOINTS[targetOperation]}?${query}`, { credentials: 'include' });
+        const response = await fetchWithRetry(`${base}${ENDPOINTS[targetOperation]}?${query}`, { credentials: 'include' });
         if (!response.ok) {
             throw new OnlineProviderError('network', `KuGouMusicApi request failed: ${response.status}`, 'kugou');
         }

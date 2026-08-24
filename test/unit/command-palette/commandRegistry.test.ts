@@ -4,6 +4,7 @@ import { COMMAND_PALETTE_COMMANDS, getCommandPaletteMatches, getQueueSongMatches
 import type { CommandPaletteContext } from '../../../src/components/command-palette/types';
 
 const createContext = (overrides: Partial<CommandPaletteContext> = {}): CommandPaletteContext => ({
+    currentSong: null,
     currentSearchSourceTab: 'netease',
     localSongs: [],
     localLibraryCatalog: { entities: [], assignments: [] },
@@ -23,14 +24,21 @@ const createContext = (overrides: Partial<CommandPaletteContext> = {}): CommandP
     submitSearch: vi.fn(async () => true),
     togglePlay: vi.fn(),
     toggleLoop: vi.fn(),
+    volume: 0.5,
+    setVolume: vi.fn(),
     onReplayGainModeChange: vi.fn(),
     openAudioEqualizer: vi.fn(),
+    applyAudioSoundPreset: vi.fn(),
     handleNextTrack: vi.fn(),
     handlePrevTrack: vi.fn(),
     shuffleQueue: vi.fn(),
+    clearQueue: vi.fn(),
+    applyQueueBatchOperation: vi.fn(() => true),
     canGenerateAITheme: true,
     isGeneratingTheme: false,
     generateAITheme: vi.fn(),
+    themeGenerationSource: 'ai',
+    setThemeGenerationSource: vi.fn(),
     setVisualizerMode: vi.fn(),
     randomVisualizerModePerSong: false,
     toggleRandomVisualizerModePerSong: vi.fn(),
@@ -46,6 +54,8 @@ const createContext = (overrides: Partial<CommandPaletteContext> = {}): CommandP
     toggleSubtitleOverlayBackground: vi.fn(),
     alwaysShowPlayerBackButton: false,
     toggleAlwaysShowPlayerBackButton: vi.fn(),
+    alwaysShowTrackSwitchButtons: false,
+    toggleAlwaysShowTrackSwitchButtons: vi.fn(),
     alwaysShowMainWindowTitlebar: false,
     toggleAlwaysShowMainWindowTitlebar: vi.fn(),
     toggleDaylightMode: vi.fn(),
@@ -54,6 +64,7 @@ const createContext = (overrides: Partial<CommandPaletteContext> = {}): CommandP
     toggleVoiceInputPause: vi.fn(),
     preventDisplaySleepDuringPlayback: false,
     togglePreventDisplaySleepDuringPlayback: vi.fn(),
+    toggleWallpaperMode: vi.fn(),
     setAppLanguagePreference: vi.fn(async () => undefined),
     runAutoMatchBestLyric: vi.fn(async () => true),
     setIsUserGuideModalOpen: vi.fn(),
@@ -146,6 +157,32 @@ describe('command palette registry', () => {
         expect(context.openAudioEqualizer).toHaveBeenCalled();
     });
 
+    it('opens the volume control command and accepts only values from 0 to 100', () => {
+        const context = createContext({ volume: 0.42 });
+        const [match] = getCommandPaletteMatches('音量条');
+
+        expect(match.command.id).toBe('playback-volume');
+        expect(match.command.requiresInput).toBe(true);
+        expect(match.command.getInitialInput?.(context)).toBe('42');
+        expect(match.command.execute('75', context)).toBe(true);
+        expect(context.setVolume).toHaveBeenCalledWith(0.75);
+
+        expect(match.command.execute('-1', context)).toBe(false);
+        expect(match.command.execute('101', context)).toBe(false);
+        expect(match.command.execute('loud', context)).toBe(false);
+        expect(context.setVolume).toHaveBeenCalledTimes(1);
+    });
+
+    it('applies a full sound preset from the command palette', () => {
+        const context = createContext();
+        const [match] = getCommandPaletteMatches('低保真', context);
+
+        expect(match.command.id).toBe('playback-sound-preset-lofi');
+        match.command.execute(match.input, context);
+
+        expect(context.applyAudioSoundPreset).toHaveBeenCalledWith('lofi');
+    });
+
     it('matches sync server settings and manual sync commands', () => {
         expect(getCommandPaletteMatches('sync server')[0].command.id).toBe('settings-r2-sync');
         expect(getCommandPaletteMatches('立即同步')[0].command.id).toBe('sync-now');
@@ -224,6 +261,25 @@ describe('command palette registry', () => {
         expect(fullQueue[17].command.queueSong).toBe(playQueue[17]);
         expect(filteredQueue).toHaveLength(1);
         expect(filteredQueue[0].command.queueIndex).toBe(17);
+    });
+
+    it('clears the play queue and hides the command when the queue is empty', () => {
+        const playQueue: SongResult[] = [{
+            id: 1,
+            name: 'Queue Song 1',
+            artists: [{ id: 1, name: 'Artist 1' }],
+            album: { id: 1, name: 'Album 1' },
+            durationMs: 180_000,
+        }];
+        const context = createContext({ playQueue });
+
+        const [match] = getCommandPaletteMatches('清空队列', context);
+        expect(match.command.id).toBe('playback-clear-queue');
+        expect(match.command.execute(match.input, context)).toBe(true);
+        expect(context.clearQueue).toHaveBeenCalled();
+
+        expect(getCommandPaletteMatches('清空队列', createContext())
+            .some(entry => entry.command.id === 'playback-clear-queue')).toBe(false);
     });
 
     it('matches commands by Chinese keyword and pinyin', () => {
@@ -462,6 +518,41 @@ describe('command palette registry', () => {
             .toEqual(recentIds);
     });
 
+    it('prioritizes remembered commands within the same search match quality', () => {
+        const matches = getCommandPaletteMatches(
+            'panel',
+            createContext(),
+            ['panel-controls', 'panel-queue'],
+        );
+        const panelCommandIds = matches
+            .map(match => match.command.id)
+            .filter(commandId => commandId.startsWith('panel-'));
+
+        expect(panelCommandIds.slice(0, 2)).toEqual(['panel-controls', 'panel-queue']);
+    });
+
+    it('uses MRU order when remembered commands are equally strong exact matches', () => {
+        const matches = getCommandPaletteMatches(
+            'local',
+            undefined,
+            ['home-local', 'search-local'],
+        );
+
+        expect(matches.slice(0, 2).map(match => match.command.id))
+            .toEqual(['home-local', 'search-local']);
+    });
+
+    it('keeps an exact non-remembered match above a fuzzy remembered match', () => {
+        const matches = getCommandPaletteMatches(
+            'queue',
+            createContext(),
+            ['panel-queue'],
+        );
+
+        expect(matches[0].command.id).toBe('queue');
+        expect(matches.findIndex(match => match.command.id === 'panel-queue')).toBeGreaterThan(0);
+    });
+
     it('matches and executes background and visualizer monet switching commands', () => {
         const context = createContext();
 
@@ -568,5 +659,33 @@ describe('command palette registry', () => {
         expect(match.command.id).toBe('visualizer-toggle-random-per-song');
         match.command.execute('', context);
         expect(context.toggleRandomVisualizerModePerSong).toHaveBeenCalled();
+    });
+});
+
+describe('theme generation source commands', () => {
+    it('offers only the source that is not already active', () => {
+        const aiContext = createContext({ themeGenerationSource: 'ai' });
+        const aiIds = getCommandPaletteMatches('theme source', aiContext).map(match => match.command.id);
+        expect(aiIds).toContain('theme-source-cover');
+        expect(aiIds).not.toContain('theme-source-ai');
+
+        const coverContext = createContext({ themeGenerationSource: 'cover' });
+        const coverIds = getCommandPaletteMatches('theme source', coverContext).map(match => match.command.id);
+        expect(coverIds).toContain('theme-source-ai');
+        expect(coverIds).not.toContain('theme-source-cover');
+    });
+
+    it('switches the source when executed', () => {
+        const context = createContext({ themeGenerationSource: 'ai' });
+        const command = COMMAND_PALETTE_COMMANDS.find(entry => entry.id === 'theme-source-cover');
+
+        expect(command?.execute('', context)).toBe(true);
+        expect(context.setThemeGenerationSource).toHaveBeenCalledWith('cover');
+    });
+
+    it('is findable by its Chinese name', () => {
+        const ids = getCommandPaletteMatches('封面取色', createContext({ themeGenerationSource: 'ai' }))
+            .map(match => match.command.id);
+        expect(ids).toContain('theme-source-cover');
     });
 });

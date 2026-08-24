@@ -6,6 +6,7 @@ import type {
     ProviderCollection,
     ProviderUser,
 } from '../../types/onlineMusic';
+import { getOriginalCoverUrl } from '../../utils/coverUrl';
 
 // src/services/onlineMusic/qqNormalize.ts
 
@@ -37,11 +38,19 @@ const jsonData = (entries: Array<[string, unknown]>): Record<string, JsonValue> 
 );
 
 export const getQqAlbumCoverUrl = (albumMid: string): string | undefined => (
-    albumMid ? `${ALBUM_COVER_BASE}${albumMid}.jpg?max_age=2592000` : undefined
+    albumMid
+        ? getOriginalCoverUrl(`${ALBUM_COVER_BASE}${albumMid}.jpg?max_age=2592000`)
+        : undefined
 );
 
 export const getQqSingerAvatarUrl = (singerMid: string): string | undefined => (
-    singerMid ? `${SINGER_AVATAR_BASE}${singerMid}.jpg?max_age=2592000` : undefined
+    singerMid
+        ? getOriginalCoverUrl(`${SINGER_AVATAR_BASE}${singerMid}.jpg?max_age=2592000`)
+        : undefined
+);
+
+const normalizeQqCoverUrl = (coverUrl: unknown): string => (
+    getOriginalCoverUrl(text(coverUrl))
 );
 
 // 专辑与歌手的集合身份一律用 mid。上游同时给出数字 `albumid` / `singer.id`，但那两个不是
@@ -111,7 +120,22 @@ export const normalizeQqSong = (raw: unknown): UnifiedSong => {
 
     const durationMs = Number(item.durationMs);
     const intervalSeconds = Number(pick(item, 'interval', 'duration'));
-    const coverUrl = text(pick(album, 'coverUrl', 'picUrl')) || getQqAlbumCoverUrl(albumMid);
+    const coverUrl = normalizeQqCoverUrl(pick(album, 'coverUrl', 'picUrl')) || getQqAlbumCoverUrl(albumMid);
+    // QQ liked / playlist rows expose pay flags under `pay`; empty getMusicPlay purl often
+    // correlates with pay_play / pay_month, so keep them for UI copy (not for hard-blocking).
+    const pay = record(item.pay);
+    const payPlayRaw = Number(
+        pick(pay, 'pay_play', 'payPlay')
+        ?? pick(item, 'pay_play', 'payPlay')
+        ?? pick(providerData, 'payPlay'),
+    );
+    const payMonthRaw = Number(
+        pick(pay, 'pay_month', 'payMonth')
+        ?? pick(item, 'pay_month', 'payMonth')
+        ?? pick(providerData, 'payMonth'),
+    );
+    const payPlay = Number.isFinite(payPlayRaw) && payPlayRaw > 0 ? payPlayRaw : undefined;
+    const payMonth = Number.isFinite(payMonthRaw) && payMonthRaw > 0 ? payMonthRaw : undefined;
 
     return {
         id: songId,
@@ -138,6 +162,8 @@ export const normalizeQqSong = (raw: unknown): UnifiedSong => {
                 ['songMid', songMid],
                 ['albumMid', albumMid],
                 ['mediaMid', mediaMid],
+                ['payPlay', payPlay],
+                ['payMonth', payMonth],
             ]),
         },
     };
@@ -225,7 +251,7 @@ const normalizeQqAlbum = (item: any, existing: any): ProviderCollection => {
     const albumMid = text(pick(item, 'albumMID', 'albummid', 'albumMid', 'mid') ?? pick(existing, 'albumMid'));
     const name = text(pick(item, 'albumName', 'albumname', 'name', 'title'));
     // `pic` 是收藏专辑那条 CGI 给的完整 URL；拿得到就不必再按 mid 拼一个。
-    const coverUrl = text(pick(item, 'coverUrl', 'picUrl', 'albumPic', 'pic')) || getQqAlbumCoverUrl(albumMid);
+    const coverUrl = normalizeQqCoverUrl(pick(item, 'coverUrl', 'picUrl', 'albumPic', 'pic')) || getQqAlbumCoverUrl(albumMid);
     const description = text(pick(item, 'desc', 'description'));
     const publisher = text(pick(item, 'company', 'publisher'));
     // `ordertime` 是收藏时间不是发行时间，刻意不列入候选。
@@ -253,7 +279,7 @@ const normalizeQqAlbum = (item: any, existing: any): ProviderCollection => {
 const normalizeQqArtist = (item: any, existing: any): ProviderCollection => {
     const singerMid = text(pick(item, 'singerMID', 'singermid', 'singerMid', 'mid') ?? pick(existing, 'singerMid'));
     const name = text(pick(item, 'singerName', 'singername', 'singer_name', 'name', 'title'));
-    const coverUrl = text(pick(item, 'coverUrl', 'singerPic', 'singerpic', 'picUrl')) || getQqSingerAvatarUrl(singerMid);
+    const coverUrl = normalizeQqCoverUrl(pick(item, 'coverUrl', 'singerPic', 'singerpic', 'picUrl')) || getQqSingerAvatarUrl(singerMid);
     const description = text(pick(item, 'singer_brief', 'singerBrief', 'desc', 'description'));
     const trackCount = Number(pick(item, 'total_song', 'totalSong', 'song_num', 'songNum', 'trackCount'));
     const albumCount = Number(pick(item, 'total_album', 'totalAlbum', 'album_num', 'albumNum', 'albumCount'));
@@ -293,7 +319,7 @@ export const normalizeQqCollection = (raw: unknown, type = 'playlist'): Provider
         ?? (tid === undefined && dirId === undefined && Object.keys(existing).length === 0 ? rawId : undefined);
     const name = text(pick(item, 'dirName', 'dirname', 'dissname', 'title', 'name'));
     // GetPlaylistByUin exposes both cover sizes and songNum; cached normalized keys remain fallbacks.
-    const coverUrl = text(pick(item, 'bigpicUrl', 'picUrl', 'picurl', 'coverUrl'));
+    const coverUrl = normalizeQqCoverUrl(pick(item, 'bigpicUrl', 'picUrl', 'picurl', 'coverUrl'));
     const trackCount = Number(pick(item, 'songNum', 'songnum', 'trackCount'));
 
     return {

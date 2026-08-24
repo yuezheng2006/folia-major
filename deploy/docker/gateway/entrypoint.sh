@@ -15,6 +15,19 @@ case "${FOLIA_AI_PROVIDER:-google}" in
     ;;
 esac
 
+# Compose defaults keep local docker-compose hostnames; Zeabur overrides via env.
 export FOLIA_AI_PROVIDER
-envsubst '${FOLIA_AI_PROVIDER}' < /etc/nginx/nginx.conf.template > /tmp/nginx.conf
+export FOLIA_NETEASE_UPSTREAM="${FOLIA_NETEASE_UPSTREAM:-netease-api:3000}"
+export FOLIA_KUGOU_UPSTREAM="${FOLIA_KUGOU_UPSTREAM:-kugou-api:3000}"
+export FOLIA_QQ_UPSTREAM="${FOLIA_QQ_UPSTREAM:-qq-api:3000}"
+export FOLIA_API_UPSTREAM="${FOLIA_API_UPSTREAM:-backend:3000}"
+export FOLIA_DNS_RESOLVER="${FOLIA_DNS_RESOLVER:-$(awk '/^nameserver/ {print $2; exit}' /etc/resolv.conf)}"
+
+envsubst '${FOLIA_AI_PROVIDER} ${FOLIA_NETEASE_UPSTREAM} ${FOLIA_KUGOU_UPSTREAM} ${FOLIA_QQ_UPSTREAM} ${FOLIA_API_UPSTREAM} ${FOLIA_DNS_RESOLVER}' \
+  < /etc/nginx/nginx.conf.template > /tmp/nginx.conf
+
+if [ -x /usr/local/bin/folia-api ]; then
+  /usr/local/bin/folia-api &
+fi
+
 exec nginx -c /tmp/nginx.conf -g 'daemon off;'

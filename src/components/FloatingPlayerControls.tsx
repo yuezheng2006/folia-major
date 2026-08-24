@@ -1,10 +1,25 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
 import { Play, Pause, Repeat, Repeat1, RepeatOff,ChartBar } from 'lucide-react';
 import { MotionValue } from 'framer-motion';
 import ProgressBar from './ProgressBar';
 import { PlayerState, LyricData, Theme } from '../types';
 import LyricsTimelineModal from './modal/LyricsTimelineModal';
+import TrackTitleNavigator from './floating-player/TrackTitleNavigator';
+
+export interface TrackNavigation {
+    /** 当前曲目的稳定身份，用于识别「确实换歌了」；相邻两首同名时标题字符串不变，不能拿标题判断 */
+    currentTrackKey: string;
+    onPrev: () => void;
+    onNext: () => void;
+    canPrev: boolean;
+    canNext: boolean;
+    prevTitle: string | null;
+    nextTitle: string | null;
+    prevLabel: string;
+    nextLabel: string;
+}
 
 const CONTROL_LAYOUT_SPRING = {
     type: 'spring' as const,
@@ -39,6 +54,7 @@ interface FloatingPlayerControlsProps {
     isHidden?: boolean;
     hideControlBar?: boolean;
     controlsDisabled?: boolean;
+    trackNavigation?: TrackNavigation | null;
 }
 
 
@@ -65,7 +81,9 @@ const FloatingPlayerControls: React.FC<FloatingPlayerControlsProps> = ({
     isHidden = false,
     hideControlBar = false,
     controlsDisabled = false,
+    trackNavigation = null,
 }) => {
+    const { t } = useTranslation();
     // const isDaylight = theme?.name === 'Daylight Default'; // Deprecated, passed as prop
     const glassBgExpanded = isDaylight ? 'bg-white/60 border border-white/20 shadow-xl' : 'bg-black/40 border border-white/5';
     const glassBgCollapsed = isDaylight ? 'bg-white/40 border border-white/20 shadow-lg hover:bg-white/50' : 'bg-black/20 border border-white/5 hover:bg-black/30';
@@ -166,7 +184,7 @@ const FloatingPlayerControls: React.FC<FloatingPlayerControlsProps> = ({
                         layout
                         transition={{ layout: CONTROL_LAYOUT_SPRING }}
                         onClick={handleClick}
-                        className={`backdrop-blur-3xl shadow-2xl overflow-hidden cursor-pointer rounded-full relative transition-colors duration-300
+                        className={`backdrop-blur-xl shadow-2xl overflow-hidden cursor-pointer rounded-full relative transition-colors duration-300
                             ${showExpanded ? `p-3 ${glassBgExpanded} w-full` : `px-4 py-2 ${glassBgCollapsed} w-[80%] md:w-[60%]`}`}
                     >
                         <motion.div layout transition={{ layout: CONTROL_LAYOUT_SPRING }} className="w-full">
@@ -190,6 +208,7 @@ const FloatingPlayerControls: React.FC<FloatingPlayerControlsProps> = ({
                                     hasLyrics={!!lyrics}
                                     isDaylight={isDaylight}
                                     controlsDisabled={controlsDisabled}
+                                    trackNavigation={trackNavigation}
                                 />
                             ) : (
                                 <CollapsedView
@@ -248,6 +267,7 @@ interface ExpandedViewProps {
     trackColor?: string;
     isDaylight?: boolean;
     controlsDisabled?: boolean;
+    trackNavigation?: TrackNavigation | null;
 }
 
 const ExpandedView: React.FC<ExpandedViewProps> = ({
@@ -269,17 +289,36 @@ const ExpandedView: React.FC<ExpandedViewProps> = ({
     trackColor,
     isDaylight,
     controlsDisabled = false,
+    trackNavigation = null,
 }) => {
+    const { t } = useTranslation();
     return (
         <div className="grid w-full grid-cols-[1fr_auto_1fr] items-center gap-x-4 gap-y-2 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
             {/* Desktop Layout - responsive grid positions apply from the sm breakpoint */}
             {/* Mobile Layout - base grid positions apply below the sm breakpoint */}
             {/* Row 1: Centered Title */}
-            <div
-                className="col-span-3 row-start-1 min-w-0 truncate px-2 text-center text-sm font-bold select-none sm:col-start-2 sm:col-span-1"
-                style={{ color: primaryColor }}
-            >
-                {currentSong?.name || noTrackText}
+            <div className="col-span-3 row-start-1 min-w-0 px-2 sm:col-start-2 sm:col-span-1">
+                {trackNavigation ? (
+                    <TrackTitleNavigator
+                        title={currentSong?.name || noTrackText}
+                        trackKey={trackNavigation.currentTrackKey}
+                        prevTitle={trackNavigation.prevTitle}
+                        nextTitle={trackNavigation.nextTitle}
+                        canPrev={trackNavigation.canPrev}
+                        canNext={trackNavigation.canNext}
+                        onPrev={trackNavigation.onPrev}
+                        onNext={trackNavigation.onNext}
+                        prevLabel={trackNavigation.prevLabel}
+                        nextLabel={trackNavigation.nextLabel}
+                        color={primaryColor}
+                        isDaylight={isDaylight}
+                        disabled={controlsDisabled}
+                    />
+                ) : (
+                    <div className="truncate text-center text-sm font-bold select-none" style={{ color: primaryColor }}>
+                        {currentSong?.name || noTrackText}
+                    </div>
+                )}
             </div>
 
             {/* Row 3: Loop Button, Play Button, Lyrics Button */}
@@ -324,7 +363,7 @@ const ExpandedView: React.FC<ExpandedViewProps> = ({
                     disabled={!hasLyrics}
                     className={`col-start-3 row-start-2 justify-self-start rounded-full p-2 transition-colors sm:justify-self-auto ${!hasLyrics ? 'cursor-not-allowed opacity-20' : `opacity-40 hover:opacity-100 ${isDaylight ? 'hover:bg-black/5' : 'hover:bg-white/10'}`}`}
                     style={{ color: primaryColor }}
-                    title="View Lyrics Timeline"
+                    title={t('ui.viewLyricsTimeline')}
                 >
                     <ChartBar size={20} className="sm:h-[18px] sm:w-[18px]" />
                 </button>

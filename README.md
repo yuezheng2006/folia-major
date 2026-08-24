@@ -14,6 +14,7 @@ Lyrics Reimagined // 辞曲新境
 [![GitHub stars](https://img.shields.io/github/stars/chthollyphile/folia-major?style=social)](https://github.com/chthollyphile/folia-major/stargazers)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D24-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/chthollyphile/folia-major)
+[![Discord](https://img.shields.io/discord/1541051241822687232?logo=discord&logoColor=white&label=Join%20our%20Discord)](https://discord.gg/dMDBTHxeKd)
 <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
 [![All Contributors](https://img.shields.io/badge/all_contributors-35-orange.svg?style=flat-square)](CONTRIBUTORS.md)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
@@ -144,7 +145,7 @@ https://github.com/user-attachments/assets/704f195a-2194-434b-86e8-8f36290e5cc4
 - **Flatpak**: 社区提供的第三方 flatpak，详情见 [Flatpark](https://flatpark.org/apps/top.izuna.foliamajor/)。
 
 > [!IMPORTANT]
-> 如果国内网络从 GitHub Releases 下载较慢，可以使用 [网盘链接](https://pan.quark.cn/s/6e4c6fa3bc6f) 下载。网盘链接仅提供 Windows 与 Apple silicon 的正式版安装包.
+> 如果国内网络从 GitHub Releases 下载较慢，可以使用 [夸克网盘](https://pan.quark.cn/s/6e4c6fa3bc6f) 或 [百度云](https://pan.baidu.com/s/1f0x3g-8PMcNCO-TJ5z1rPw?pwd=flia) 下载。网盘链接仅提供 Windows 与 Apple silicon 的正式版安装包.
 
 Linux 包、Wayland / Hyprland 遥控窗和桌面端细节见 [技术与开发说明](docs/technical.md)。
 
@@ -173,6 +174,12 @@ Folia 会读取音频文件元数据、同目录歌词和封面，并可通过�
 
 完整的导入、重扫、匹配、实体编辑、歌单、缓存和故障排查说明见 [本地音乐库管理](docs/local-library-management.md)。
 
+## Community
+
+加入discord社群，共同交流，获得帮助
+
+[![Discord](https://img.shields.io/discord/1541051241822687232?logo=discord&logoColor=white&label=Join%20our%20Discord)](https://discord.gg/dMDBTHxeKd)
+
 ## 贡献者
 
 感谢所有为本项目进行 Issue 提交、Bug 报告、想法建议、测试与代码编写的贡献者，均依据 all-contributors 规范进行统计
@@ -198,6 +205,7 @@ Folia 会读取音频文件元数据、同目录歌词和封面，并可通过�
 - [chenglou/pretext](https://github.com/chenglou/pretext)
 - [MakcRe/KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi)
 - [paper-design/shaders](https://github.com/paper-design/shaders)
+- [yakult-green-tea/qq-music-api](https://github.com/yakult-green-tea/qq-music-api)
 
 本项目接入了 [Apple Music-like Lyrics TTML 逐词歌词库](https://github.com/amll-dev/amll-ttml-db) 以提供高质量的歌词文件，感谢此歌词库的作者和贡献者们。
 

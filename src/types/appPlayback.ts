@@ -33,7 +33,11 @@ export type UnavailableReplacementRequest = {
     options: PlaybackNavigationOptions;
 };
 
-export type SkipPromptMessageKey = 'status.songUnavailablePrompt' | 'status.playbackErrorPrompt';
+export type SkipPromptMessageKey =
+    | 'status.songUnavailablePrompt'
+    | 'status.songNoPlayLinkPrompt'
+    | 'status.songNoPlayLinkMembershipPrompt'
+    | 'status.playbackErrorPrompt';
 
 export type PlaybackSnapshot = {
     currentSong: SongResult | null;

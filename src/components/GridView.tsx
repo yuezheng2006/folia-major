@@ -1,9 +1,10 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, useMotionValue, animate, AnimatePresence, useDragControls } from 'framer-motion';
-import { ChevronLeft, Disc, Play, Plus, Loader2, Heart, ListPlus, Pencil, Search, X, RefreshCw, Trash2, Star, Tags } from 'lucide-react';
+import { ChevronLeft, Disc, Download, Play, Plus, Loader2, Heart, ListPlus, Pencil, Search, X, RefreshCw, Trash2, Star, Tags } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { SongResult, type LocalSong, type StatusMessage, Theme, type UnifiedSong } from '../types';
 import { getSongUnavailableLabel, isSongUnavailable } from '../services/onlineMusic/songAvailability';
+import { getSongListBadgeLabel } from '../services/onlineMusic/onlineUnavailableReason';
 import { getNavidromeConfig, navidromeApi } from '../services/navidromeService';
 import { formatSongName } from '../utils/songNameFormatter';
 import { getSizedCoverUrl } from '../utils/coverUrl';
@@ -34,6 +35,7 @@ import {
     GRID_INITIAL_BATCH_SIZE,
 } from './folia-grid/progressiveGrid';
 import { useProgressiveItemEntrance } from './folia-grid/useProgressiveItemEntrance';
+import { useLocalCoverPreloader } from '../hooks/useLocalCoverPreloader';
 import { compareLocalFolderSongs, type LocalSongFolderSortDirection, type LocalSongFolderSortField } from '../utils/localSongSorting';
 import { resolveGridViewContextTracks } from './folia-grid/gridViewContextActions';
 import {
@@ -51,6 +53,7 @@ export interface GridViewSourceActions {
         onDeleteFolder?: (collection: any) => Promise<void> | void;
         onRenamePlaylist?: (playlistId: string, name: string) => Promise<void> | void;
         onDeletePlaylist?: (playlistId: string) => Promise<void> | void;
+        onExportPlaylist?: (playlistId: string) => Promise<void> | void;
         onRemovePlaylistSongs?: (playlistId: string, songIds: string[]) => Promise<void> | void;
         onEditEntity?: (entityId: string) => Promise<void> | void;
         onOrganizeFolderSongInfo?: (collection: any) => Promise<void> | void;
@@ -182,9 +185,16 @@ export const PolaroidCard = React.memo<{
         isFocused = false,
     }) => {
         const isUnavailable = mode === 'tracks' && item.rawTrack ? isSongUnavailable(item.rawTrack) : false;
-        const unavailableTagText = (mode === 'tracks' && item.rawTrack)
+        const listBadgeText = (mode === 'tracks' && item.rawTrack)
+            ? getSongListBadgeLabel(item.rawTrack, {
+                unavailable: t('status.songUnavailableTag'),
+                membership: t('status.songMembershipTag'),
+            })
+            : null;
+        const unavailableTagText = isUnavailable && item.rawTrack
             ? getSongUnavailableLabel(item.rawTrack, t('status.songUnavailableTag'))
             : '';
+        const membershipTagText = !isUnavailable && listBadgeText ? listBadgeText : '';
         const trackAlbum = item.rawTrack?.album;
         const albumTargetId = resolveGridTrackAlbumTargetId(item.rawTrack);
         const canOpenAlbum = Boolean(
@@ -252,7 +262,7 @@ export const PolaroidCard = React.memo<{
                     {item.coverUrl ? (
                         <>
                             <img
-                                src={item.coverUrl}
+                                src={getSizedCoverUrl(item.coverUrl, 512)}
                                 alt={typeof item.name === 'string' ? item.name : ''}
                                 loading="lazy"
                                 decoding="async"
@@ -294,6 +304,13 @@ export const PolaroidCard = React.memo<{
                         <div className="absolute inset-0 bg-black/40 flex items-center justify-center p-2 text-center z-10">
                             <span className="text-[10px] bg-red-500/80 text-white font-bold px-2 py-1 rounded-full uppercase tracking-wider">
                                 {unavailableTagText || t('status.songUnavailableTag').toUpperCase()}
+                            </span>
+                        </div>
+                    )}
+                    {!isUnavailable && membershipTagText && (
+                        <div className="absolute left-2 top-2 z-10">
+                            <span className="text-[10px] bg-black/55 text-white font-medium px-2 py-0.5 rounded-full tracking-wide">
+                                {membershipTagText}
                             </span>
                         </div>
                     )}
@@ -976,6 +993,17 @@ export const GridView: React.FC<GridViewProps> = ({
         }
     }, [isLocalAllSongsCollection, sourceActions]);
 
+    const handleExportLocalPlaylist = useCallback(async () => {
+        if (!collection?.playlistId || collection.source !== 'local' || collection.type !== 'playlist') return;
+
+        setIsSourceActionPending(true);
+        try {
+            await sourceActions?.local?.onExportPlaylist?.(collection.playlistId);
+        } finally {
+            setIsSourceActionPending(false);
+        }
+    }, [collection, sourceActions]);
+
     const handleAddNavidromeCollectionToPlaylist = useCallback(async (playlistId: string | number) => {
         await sourceActions?.navidrome?.onAddToPlaylist?.(playlistId, playableTracks);
     }, [playableTracks, sourceActions]);
@@ -1513,6 +1541,8 @@ export const GridView: React.FC<GridViewProps> = ({
         renderRing,
         fallbackIndexRef: focusedIndexRef,
     });
+    const gridCoverUrls = useMemo(() => gridItems.map(item => item.coverUrl), [gridItems]);
+    useLocalCoverPreloader(gridCoverUrls, renderedIndexes);
 
     const dragBounds = useMemo(() => {
         if (baseCoords.length === 0) return { left: 0, right: 0, top: 0, bottom: 0 };
@@ -1815,7 +1845,7 @@ export const GridView: React.FC<GridViewProps> = ({
                                 onSelect={() => {
                                     if (mode === 'tracks' && onSelectTrack && item.rawTrack) {
                                         persistNavigationState(idx);
-                                        onSelectTrack(item.rawTrack, displayTracks);
+                                        onSelectTrack(item.rawTrack, contextActionTracks);
                                     } else if (mode === 'collection' && onSelectCollection) {
                                         onSelectCollection(item.rawCollection || item);
                                     }
@@ -1861,7 +1891,7 @@ export const GridView: React.FC<GridViewProps> = ({
         cardFrameOptions,
         isEditMode,
         focusedIndex,
-        displayTracks,
+        contextActionTracks,
         onSelectTrack,
         onSelectCollection,
         onSelectArtist,
@@ -1969,7 +1999,7 @@ export const GridView: React.FC<GridViewProps> = ({
                 if (mode === 'tracks' && onSelectTrack && focusedItem.rawTrack) {
                     e.preventDefault();
                     persistNavigationState(focusedIndex);
-                    onSelectTrack(focusedItem.rawTrack, displayTracks);
+                    onSelectTrack(focusedItem.rawTrack, contextActionTracks);
                 } else if (mode === 'collection' && onSelectCollection) {
                     e.preventDefault();
                     onSelectCollection(focusedItem.rawCollection || focusedItem);
@@ -2016,7 +2046,7 @@ export const GridView: React.FC<GridViewProps> = ({
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [
         baseCoords,
-        displayTracks,
+        contextActionTracks,
         focusedIndex,
         gridItems,
         isCreatePlaylistOpen,
@@ -2283,7 +2313,7 @@ export const GridView: React.FC<GridViewProps> = ({
                             {/* Cover Image */}
                             <div className="w-full aspect-square rounded-2xl overflow-hidden shadow-lg mb-4 bg-zinc-800/20 relative shrink-0">
                                 {infoPanelCoverUrl ? (
-                                    <img src={toHttps(infoPanelCoverUrl)} alt={infoCollection?.name || title} className="w-full h-full object-cover select-none pointer-events-none" />
+                                    <img src={getSizedCoverUrl(toHttps(infoPanelCoverUrl), 512)} alt={infoCollection?.name || title} decoding="async" className="w-full h-full object-cover select-none pointer-events-none" />
                                 ) : (
                                     <Disc size={64} className="opacity-20 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
                                 )}
@@ -2522,6 +2552,16 @@ export const GridView: React.FC<GridViewProps> = ({
                                         {isDailyRecommendationsCollection
                                             ? (isEditMode ? t('home.finishManagingRecommendations') : t('home.manageRecommendations'))
                                             : (isEditMode ? t('localMusic.finishEditing') : t('localMusic.editPlaylist'))}
+                                    </button>
+                                )}
+                                {isLocalCollection && collection?.type === 'playlist' && collection.playlistId && sourceActions?.local?.onExportPlaylist && (
+                                    <button
+                                        onClick={() => void handleExportLocalPlaylist()}
+                                        disabled={isSourceActionPending}
+                                        className="w-full py-2.5 rounded-full text-xs font-semibold bg-zinc-800/10 dark:bg-zinc-100/10 hover:bg-zinc-900 hover:text-zinc-100 dark:hover:bg-zinc-100 dark:hover:text-zinc-900 transition-all flex items-center justify-center gap-1.5 disabled:opacity-40 cursor-pointer"
+                                    >
+                                        {isSourceActionPending ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                                        {t('localMusic.exportPlaylist')}
                                     </button>
                                 )}
                                 {isLocalEntityCollection && sourceActions?.local?.onEditEntity && (

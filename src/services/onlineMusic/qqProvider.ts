@@ -218,7 +218,12 @@ const getAudioSource = async (song: SongResult, quality: AudioQualityPreference)
         // `true` means the upstream answered normally but issued no stream for this account.
         upstreamRefusedPlayLink: sawEmptyPlayLink,
     });
-    return null;
+    // Empty purl with HTTP 200 is a stable refusal (membership / copyright), not a transient miss.
+    // Surface it as not-playable so UI can avoid the NetEase-style "taken down" copy.
+    if (sawEmptyPlayLink) {
+        throw new OnlineProviderError('not-playable', '暂无播放链接', 'qq');
+    }
+    throw new OnlineProviderError('unavailable', 'Failed to resolve QQ play URL', 'qq');
 };
 
 // Delegates to the existing QRC pipeline, which owns decryption, translation and romanization.
@@ -256,7 +261,7 @@ const getLoginStatus = async (): Promise<ProviderUser | null> => {
         });
         return user;
     } catch (error) {
-        // The backend keeps auth sessions in one process, so a restart or the 24h TTL also arrives as 401.
+        // Missing, expired, rejected, or non-persisted backend sessions all arrive as 401.
         if (error instanceof OnlineProviderError && error.code === 'auth-required') {
             console.info('[QQProvider] login-status:auth-required');
             return null;
@@ -278,7 +283,7 @@ const logout = async (): Promise<void> => {
 // 扫码登录方式：`id` 就是后端 `?channel=` 的取值，UI 层只认 labelKey 与 iconKey。
 // services 层不 import 任何 .svg，图标由 UI 层按 iconKey 映射到静态资源。
 const QQ_LOGIN_METHODS: QrLoginMethod[] = [
-    { id: 'mobile', labelKey: 'home.qqLoginMethodMobile', iconKey: 'qq' },
+    { id: 'qq', labelKey: 'home.qqLoginMethodMobile', iconKey: 'qq' },
     { id: 'wechat', labelKey: 'home.qqLoginMethodWechat', iconKey: 'wechat' },
 ];
 
