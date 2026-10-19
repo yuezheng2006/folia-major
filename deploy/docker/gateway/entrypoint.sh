@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-# 当前文件：校验运行时 provider 并生成只写入临时目录的 Nginx 配置。
+# 当前文件：校验运行时 provider，解析 Zeabur/Compose 上游，并生成只写入临时目录的 Nginx 配置。
 case "${FOLIA_AI_PROVIDER:-google}" in
   google|gemini)
     FOLIA_AI_PROVIDER=gemini
@@ -60,12 +60,26 @@ fi
 
 # 前面还有一层反向代理时，nginx 看到的来源是代理自己（往往是局域网地址），白名单形同虚设。
 # 列出代理地址后，只信任它们追加的 X-Forwarded-For，从中还原真实来源。
-# 不接受 private：userland-proxy 下所有来源都是 172.x，整段信任等于让客户端自填 XFF 冒充局域网。
 FOLIA_REAL_IP_CONFIG=''
 if [ -n "${FOLIA_TRUSTED_PROXIES:-}" ]; then
   FOLIA_REAL_IP_CONFIG="$(render_address_list set_real_ip_from FOLIA_TRUSTED_PROXIES "$FOLIA_TRUSTED_PROXIES") real_ip_header X-Forwarded-For; real_ip_recursive on;"
 fi
 
-export FOLIA_AI_PROVIDER FOLIA_NAVIDROME_PRESET_ACL FOLIA_REAL_IP_CONFIG
-envsubst '${FOLIA_AI_PROVIDER} ${FOLIA_NAVIDROME_PRESET_ACL} ${FOLIA_REAL_IP_CONFIG}' < /etc/nginx/nginx.conf.template > /tmp/nginx.conf
+# Compose defaults keep local docker-compose hostnames; Zeabur overrides via env / Dockerfile.
+export FOLIA_AI_PROVIDER
+export FOLIA_NAVIDROME_PRESET_ACL
+export FOLIA_REAL_IP_CONFIG
+export FOLIA_NETEASE_UPSTREAM="${FOLIA_NETEASE_UPSTREAM:-netease-api:3000}"
+export FOLIA_KUGOU_UPSTREAM="${FOLIA_KUGOU_UPSTREAM:-kugou-api:3000}"
+export FOLIA_QQ_UPSTREAM="${FOLIA_QQ_UPSTREAM:-qq-api:3000}"
+export FOLIA_API_UPSTREAM="${FOLIA_API_UPSTREAM:-127.0.0.1:3000}"
+export FOLIA_DNS_RESOLVER="${FOLIA_DNS_RESOLVER:-$(awk '/^nameserver/ {print $2; exit}' /etc/resolv.conf)}"
+
+envsubst '${FOLIA_AI_PROVIDER} ${FOLIA_NAVIDROME_PRESET_ACL} ${FOLIA_REAL_IP_CONFIG} ${FOLIA_NETEASE_UPSTREAM} ${FOLIA_KUGOU_UPSTREAM} ${FOLIA_QQ_UPSTREAM} ${FOLIA_API_UPSTREAM} ${FOLIA_DNS_RESOLVER}' \
+  < /etc/nginx/nginx.conf.template > /tmp/nginx.conf
+
+if [ -x /usr/local/bin/folia-api ]; then
+  /usr/local/bin/folia-api &
+fi
+
 exec nginx -c /tmp/nginx.conf -g 'daemon off;'
