@@ -69,7 +69,7 @@ const normalizeSupportedLanguage = (value: string | null | undefined): Exclude<A
 
 export const readStoredAppLanguagePreference = (): AppLanguagePreference => {
   if (typeof window === 'undefined') {
-    return 'system';
+    return 'zh-CN';
   }
 
   const saved = localStorage.getItem(APP_LANGUAGE_STORAGE_KEY);
@@ -77,7 +77,7 @@ export const readStoredAppLanguagePreference = (): AppLanguagePreference => {
     return saved;
   }
 
-  return 'system';
+  return 'zh-CN';
 };
 
 const initialLanguagePreference = readStoredAppLanguagePreference();
