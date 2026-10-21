@@ -4030,7 +4030,8 @@ export default {
       "description": "Hold Ctrl + G now until the capsule fills, and the guide for the page you are on opens.",
       "touchDescription": "Tap the button below now to open the guide for this page.",
       "shortcut": "Hold Ctrl + G",
-      "required": "Try the page Ponder once to continue."
+      "required": "You can open the guide later from Help or the lightbulb button.",
+      "skip": "Skip and start using Folia"
     },
     "allChaptersDone": "That is all of them.",
     "nextChapter": "Next chapter",

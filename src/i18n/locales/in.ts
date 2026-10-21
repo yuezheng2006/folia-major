@@ -4030,7 +4030,8 @@ export default {
       "description": "Tahan Ctrl + G sampai kapsulnya terisi penuh, lalu panduan halaman ini akan terbuka.",
       "touchDescription": "Ketuk tombol di bawah untuk membuka panduan halaman ini.",
       "shortcut": "Tahan Ctrl + G",
-      "required": "Coba Ponder halaman sekali untuk melanjutkan."
+      "required": "Panduan dapat dibuka nanti dari Bantuan atau tombol lampu.",
+      "skip": "Lewati dan mulai gunakan Folia"
     },
     "allChaptersDone": "Semuanya sudah selesai.",
     "nextChapter": "Bab berikutnya",

@@ -57,7 +57,7 @@ export const UserGuideModal: React.FC<{ theme?: Theme | null }> = ({ theme }) =>
                             </div>
                         )}
 
-                        {/* 按钮始终在：这一步完不成就出不去，指针判断一旦错了，没有键盘的人只看到 Ctrl+G 会被卡死。 */}
+                        {/* 教程始终可点击，也可跳过；不依赖键盘或教程资源加载成功。 */}
                         <button
                             type="button"
                             data-testid="ponder-onboarding-open-button"
@@ -69,7 +69,19 @@ export const UserGuideModal: React.FC<{ theme?: Theme | null }> = ({ theme }) =>
                             {t('ponder.openPage')}
                         </button>
 
-                        <p className="mt-6 text-xs opacity-45">{t('ponder.onboarding.required')}</p>
+                        <button
+                            type="button"
+                            data-testid="ponder-onboarding-skip-button"
+                            onClick={() => {
+                                const modal = useSettingsModalStore.getState();
+                                modal.setLastSeenGuideVersion(__APP_VERSION__);
+                                modal.setIsUserGuideModalOpen(false);
+                            }}
+                            className="mx-auto mt-4 block rounded-full px-5 py-3 text-sm underline underline-offset-4"
+                        >
+                            {t('ponder.onboarding.skip')}
+                        </button>
+                        <p className="mt-4 text-xs opacity-60">{t('ponder.onboarding.required')}</p>
                     </motion.div>
                 </motion.div>
             )}

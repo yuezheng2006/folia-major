@@ -129,3 +129,17 @@ test('an install that answered the old single-page prompt is asked for the libra
     await expect(page.getByTestId('ponder-onboarding')).toHaveCount(0);
     expect(await requestPrompt(page)).toBe(false);
 });
+
+test('the guide can be skipped without loading the tutorial and records completion', async ({ page }) => {
+    await page.route('**/PonderOverlay*', route => route.abort());
+    await boot(page, ({ guideKey, releaseKey, appVersion }) => {
+        localStorage.removeItem(guideKey);
+        localStorage.setItem(releaseKey, appVersion);
+        localStorage.setItem('playback_entry_view_chosen', 'true');
+    });
+    test.skip(!(await runsStartupSequence(page)), 'this build does not run the startup sequence');
+    await expect(page.getByTestId('ponder-onboarding')).toBeVisible();
+    await page.getByTestId('ponder-onboarding-skip-button').click();
+    await expect(page.getByTestId('ponder-onboarding')).toHaveCount(0);
+    expect(await storageOf(page, GUIDE_VERSION_STORAGE_KEY)).toBe(APP_VERSION);
+});

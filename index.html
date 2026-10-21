@@ -13,7 +13,6 @@
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/icon.svg" />
     <title>Folia</title>
-    <script src="/runtime-config.js"></script>
   <script type="importmap">
 {
   "imports": {
@@ -284,6 +283,33 @@
       })();
     </script>
     <div id="root"></div>
+    <!-- Keep recovery independent of application bundles and runtime-config downloads. -->
+    <script>
+      window.setTimeout(function () {
+        var splash = document.getElementById('app-splash');
+        if (!splash || splash.classList.contains('is-hiding')) return;
+        var recovery = document.createElement('div');
+        recovery.id = 'app-load-recovery';
+        recovery.style.cssText = 'position:absolute;bottom:10%;left:5%;right:5%;text-align:center;color:#fff;font:16px/1.6 sans-serif';
+        var message = document.createElement('p');
+        message.textContent = '加载时间较长，可能是网络连接不稳定。可以重试，或换一个入口。 / Loading is taking longer than expected.';
+        recovery.appendChild(message);
+        var retry = document.createElement('button');
+        retry.textContent = '重新加载 / Reload';
+        retry.style.cssText = 'padding:12px 20px;border:1px solid currentColor;border-radius:24px;background:#27272a;color:white;cursor:pointer';
+        retry.onclick = function () { window.location.reload(); };
+        recovery.appendChild(retry);
+        if (window.location.hostname === 'folia-player.cyber101.cc') {
+          var direct = document.createElement('a');
+          direct.href = 'https://folia-web.zeabur.app/';
+          direct.textContent = '尝试备用入口';
+          direct.style.cssText = 'display:inline-block;margin:16px;color:white;text-decoration:underline';
+          recovery.appendChild(direct);
+        }
+        splash.appendChild(recovery);
+      }, 15000);
+    </script>
+    <script src="/runtime-config.js"></script>
     <script type="module" src="/src/index.tsx"></script>
   </body>
 </html>
