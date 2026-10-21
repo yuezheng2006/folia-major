@@ -1,47 +1,64 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronLeft, Loader2, RotateCcw } from 'lucide-react';
 import type { LyricData } from '../../types';
-import {
-    buildLyricFilterPreview,
-    getLyricFilterError,
-    LYRIC_FILTER_REGEX_EXAMPLE,
-} from '../../utils/lyrics/filtering';
+import { getLyricFilterError } from '../../utils/lyrics/filtering';
+import { getLyricStaffPatternError } from '../../utils/lyrics/staffCredits';
+import type { LyricStaffAbsorbMode, LyricStaffPolicy } from '../../utils/lyrics/staffCreditsPolicy';
+import Sheet, { SheetButton } from '../shared/Sheet';
+import { buildLyricFilterPreviewModel } from './lyric-filter/buildLyricFilterPreviewModel';
+import LyricFilterPreviewList from './lyric-filter/LyricFilterPreviewList';
+import LyricFilterRuleSection from './lyric-filter/LyricFilterRuleSection';
+import LyricStaffSection from './lyric-filter/LyricStaffSection';
+
+// src/components/modal/LyricFilterSettingsModal.tsx
+// The lyric filter window: a large sheet with the sample lyric at the left and the rules at the
+// right. Every change of a rule shows in the sample at once; nothing is stored until Save.
+
+export interface LyricFilterDraft {
+    pattern: string;
+    filterEnabled: boolean;
+    staffPolicy: LyricStaffPolicy;
+    staffMinDwellSeconds: number;
+    staffAbsorbMode: LyricStaffAbsorbMode;
+    staffPattern: string;
+}
 
 interface LyricFilterSettingsModalProps {
     isOpen: boolean;
     isDaylight: boolean;
     currentSongTitle?: string | null;
     initialPattern: string;
+    initialFilterEnabled: boolean;
+    initialStaffPolicy: LyricStaffPolicy;
+    initialStaffMinDwellSeconds: number;
+    initialStaffAbsorbMode: LyricStaffAbsorbMode;
+    initialStaffPattern: string;
     loadPreviewLyrics: () => Promise<LyricData | null>;
     onClose: () => void;
-    onSave: (pattern: string) => Promise<void> | void;
+    onSave: (draft: LyricFilterDraft) => Promise<void> | void;
 }
-
-const shellTransition = {
-    duration: 0.28,
-    ease: [0.22, 1, 0.36, 1] as const,
-};
-
-const panelMotion = {
-    initial: { y: 24, opacity: 0, scale: 0.985 },
-    animate: { y: 0, opacity: 1, scale: 1 },
-    exit: { y: 24, opacity: 0, scale: 0.985 },
-};
 
 const LyricFilterSettingsModal: React.FC<LyricFilterSettingsModalProps> = ({
     isOpen,
     isDaylight,
     currentSongTitle,
     initialPattern,
+    initialFilterEnabled,
+    initialStaffPolicy,
+    initialStaffMinDwellSeconds,
+    initialStaffAbsorbMode,
+    initialStaffPattern,
     loadPreviewLyrics,
     onClose,
     onSave,
 }) => {
     const { t } = useTranslation();
     const [draftPattern, setDraftPattern] = useState(initialPattern);
-    const [isFilterEnabled, setIsFilterEnabled] = useState(Boolean(initialPattern.trim()));
+    const [isFilterEnabled, setIsFilterEnabled] = useState(initialFilterEnabled);
+    const [draftStaffPolicy, setDraftStaffPolicy] = useState<LyricStaffPolicy>(initialStaffPolicy);
+    const [draftStaffMinDwell, setDraftStaffMinDwell] = useState(initialStaffMinDwellSeconds);
+    const [draftStaffAbsorbMode, setDraftStaffAbsorbMode] = useState<LyricStaffAbsorbMode>(initialStaffAbsorbMode);
+    const [draftStaffPattern, setDraftStaffPattern] = useState(initialStaffPattern);
     const [previewLyrics, setPreviewLyrics] = useState<LyricData | null>(null);
     const [isLoadingPreview, setIsLoadingPreview] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
@@ -52,7 +69,11 @@ const LyricFilterSettingsModal: React.FC<LyricFilterSettingsModalProps> = ({
         }
 
         setDraftPattern(initialPattern);
-        setIsFilterEnabled(Boolean(initialPattern.trim()));
+        setIsFilterEnabled(initialFilterEnabled);
+        setDraftStaffPolicy(initialStaffPolicy);
+        setDraftStaffMinDwell(initialStaffMinDwellSeconds);
+        setDraftStaffAbsorbMode(initialStaffAbsorbMode);
+        setDraftStaffPattern(initialStaffPattern);
         setIsLoadingPreview(true);
         let active = true;
 
@@ -71,32 +92,47 @@ const LyricFilterSettingsModal: React.FC<LyricFilterSettingsModalProps> = ({
         return () => {
             active = false;
         };
-    }, [initialPattern, isOpen, loadPreviewLyrics]);
+    }, [
+        initialPattern,
+        initialFilterEnabled,
+        initialStaffMinDwellSeconds,
+        initialStaffAbsorbMode,
+        initialStaffPattern,
+        initialStaffPolicy,
+        isOpen,
+        loadPreviewLyrics,
+    ]);
 
     const effectivePattern = isFilterEnabled ? draftPattern : '';
     const error = isFilterEnabled ? getLyricFilterError(draftPattern) : null;
+    // 只在自定义规则输入框可见时校验：切到「始终显示」后输入框和报错都会收起来，
+    // 再拿它禁用保存按钮，用户就只剩「切回去清空」这一条路。
+    const staffPatternError = draftStaffPolicy === 'keep' ? null : getLyricStaffPatternError(draftStaffPattern);
     const preview = useMemo(
-        () => buildLyricFilterPreview(previewLyrics, effectivePattern),
-        [effectivePattern, previewLyrics]
+        () => buildLyricFilterPreviewModel(previewLyrics, effectivePattern, {
+            policy: draftStaffPolicy,
+            minDwellSeconds: draftStaffMinDwell,
+            absorbMode: draftStaffAbsorbMode,
+            pattern: draftStaffPattern,
+        }),
+        [draftStaffAbsorbMode, draftStaffMinDwell, draftStaffPattern, draftStaffPolicy, effectivePattern, previewLyrics]
     );
 
-    const glassBg = isDaylight ? 'bg-white/70' : 'bg-black/40';
-    const borderColor = isDaylight ? 'border-black/5' : 'border-white/10';
-    const overlayBackground = isDaylight ? 'rgba(244, 244, 245, 0.9)' : 'rgba(10, 10, 12, 0.82)';
-    const cardBg = isDaylight ? 'bg-black/[0.03]' : 'bg-white/[0.04]';
-    const inputBg = isDaylight ? 'bg-black/5 border-black/10' : 'bg-white/5 border-white/10';
-    const mutedText = isDaylight ? 'text-zinc-500' : 'text-white/50';
-    const dangerText = isDaylight ? 'text-red-600' : 'text-red-300';
-    const toggleOffBackgroundClass = isDaylight ? 'bg-zinc-300/90' : 'bg-white/10';
-
     const handleSave = async () => {
-        if (error) {
+        if (error || staffPatternError) {
             return;
         }
 
         setIsSaving(true);
         try {
-            await onSave(isFilterEnabled ? draftPattern.trim() : '');
+            await onSave({
+                pattern: draftPattern.trim(),
+                filterEnabled: isFilterEnabled,
+                staffPolicy: draftStaffPolicy,
+                staffMinDwellSeconds: draftStaffMinDwell,
+                staffAbsorbMode: draftStaffAbsorbMode,
+                staffPattern: draftStaffPattern.trim(),
+            });
             onClose();
         } finally {
             setIsSaving(false);
@@ -104,159 +140,70 @@ const LyricFilterSettingsModal: React.FC<LyricFilterSettingsModalProps> = ({
     };
 
     return (
-        <AnimatePresence>
-            {isOpen && (
-                <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={shellTransition}
-                    className="fixed inset-0 z-[140] backdrop-blur-xl p-3 sm:p-5"
-                    style={{ backgroundColor: overlayBackground }}
-                    onClick={onClose}
-                >
-                    <motion.div
-                        {...panelMotion}
-                        transition={shellTransition}
-                        className={`mx-auto flex h-full max-w-6xl flex-col overflow-hidden rounded-[32px] border ${borderColor} ${glassBg} shadow-[0_24px_80px_rgba(0,0,0,0.28)]`}
-                        onClick={(event) => event.stopPropagation()}
+        <Sheet
+            isOpen={isOpen}
+            onClose={onClose}
+            isDaylight={isDaylight}
+            size="l"
+            body="panes"
+            title={t('lyricFilter.title')}
+            footer={(
+                <>
+                    <SheetButton onClick={onClose}>{t('ui.cancel')}</SheetButton>
+                    <SheetButton
+                        variant="primary"
+                        disabled={Boolean(error) || Boolean(staffPatternError) || isSaving}
+                        onClick={handleSave}
                     >
-                        <div className="flex items-center justify-between border-b border-white/10 px-4 py-4 sm:px-6">
-                            <div className="flex min-w-0 items-center gap-3">
-                                <button
-                                    type="button"
-                                    onClick={onClose}
-                                    className="h-10 w-10 rounded-full border border-white/10 bg-white/5 flex items-center justify-center transition-colors hover:bg-white/10"
-                                    style={{ color: 'var(--text-primary)' }}
-                                >
-                                    <ChevronLeft size={18} />
-                                </button>
-                                <div className="min-w-0">
-                                    <div className="truncate text-lg font-semibold sm:text-xl" style={{ color: 'var(--text-primary)' }}>
-                                        {t('lyricFilter.title')}
-                                    </div>
-                                    <div className={`mt-1 text-xs ${mutedText}`}>
-                                        {currentSongTitle ? t('lyricFilter.previewCurrentSong', { title: currentSongTitle }) : t('lyricFilter.previewFallback')}
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => setDraftPattern('')}
-                                    className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm transition-colors hover:bg-white/10"
-                                    style={{ color: 'var(--text-primary)' }}
-                                >
-                                    <RotateCcw size={14} />
-                                    <span>{t('lyricFilter.clear')}</span>
-                                </button>
-                                <button
-                                    type="button"
-                                    disabled={Boolean(error) || isSaving}
-                                    onClick={handleSave}
-                                    className="rounded-full border border-white/10 bg-white/10 px-4 py-2 text-sm font-medium transition-colors hover:bg-white/15 disabled:opacity-50"
-                                    style={{ color: 'var(--text-primary)' }}
-                                >
-                                    {isSaving ? t('lyricFilter.saving') : t('lyricFilter.save')}
-                                </button>
-                            </div>
-                        </div>
-
-                        <div className="grid flex-1 gap-0 overflow-hidden lg:grid-cols-[1.15fr_0.85fr]">
-                            <div className={`flex min-h-0 flex-col border-b ${borderColor} lg:border-b-0 lg:border-r`}>
-                                <div className="flex items-center justify-between px-4 py-4 sm:px-6">
-                                    <div>
-                                        <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                                            {t('lyricFilter.preview')}
-                                        </div>
-                                        <div className={`mt-1 text-xs ${mutedText}`}>
-                                            {preview.totalCount > 0
-                                                ? t('lyricFilter.filteredCount', { removed: preview.removedCount, total: preview.totalCount })
-                                                : t('lyricFilter.noLyricsToPreview')}
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5 sm:px-6">
-                                    {isLoadingPreview ? (
-                                        <div className="flex h-full items-center justify-center">
-                                            <Loader2 className={`animate-spin ${mutedText}`} size={28} />
-                                        </div>
-                                    ) : preview.lines.length === 0 ? (
-                                        <div className={`flex h-full items-center justify-center text-sm ${mutedText}`}>
-                                            {t('lyricFilter.emptyContent')}
-                                        </div>
-                                    ) : (
-                                        <div className="space-y-4 py-4 text-center">
-                                            {preview.lines.map(({ line, removed, index }) => (
-                                                <div
-                                                    key={`${index}-${line.startTime}-${line.fullText}`}
-                                                    className="px-3 transition-colors"
-                                                >
-                                                    <div className="flex flex-col items-center gap-1">
-                                                        <div className={`min-w-0 text-sm ${removed ? 'line-through opacity-55' : ''}`} style={{ color: 'var(--text-primary)' }}>
-                                                            {line.fullText}
-                                                        </div>
-                                                    </div>
-                                                    {line.translation && (
-                                                        <div className={`mt-1 text-xs ${removed ? 'line-through opacity-45' : mutedText}`}>
-                                                            {line.translation}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-
-                            <div className="min-h-0 overflow-y-auto px-4 py-5 sm:px-6">
-                                <div className="mb-4 flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                                    <div>
-                                        <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                                            {t('lyricFilter.enableFilter')}
-                                        </div>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onClick={() => setIsFilterEnabled(previous => !previous)}
-                                        className={`w-12 h-6 rounded-full p-1 transition-colors ${!isFilterEnabled ? toggleOffBackgroundClass : ''}`}
-                                        style={{ backgroundColor: isFilterEnabled ? 'var(--text-secondary)' : undefined }}
-                                    >
-                                        <div className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${isFilterEnabled ? 'translate-x-6' : 'translate-x-0'}`} />
-                                    </button>
-                                </div>
-
-                                <div className={`rounded-[24px] border p-4 ${cardBg} ${borderColor}`}>
-                                    <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                                        {t('lyricFilter.regexPattern')}
-                                    </div>
-                                    <div className={`mt-1 text-xs ${mutedText}`}>
-                                        {t('lyricFilter.regexDescription')}
-                                    </div>
-                                    <input
-                                        type="text"
-                                        value={draftPattern}
-                                        onChange={(event) => setDraftPattern(event.target.value)}
-                                        placeholder={t('lyricFilter.inputPlaceholder')}
-                                        disabled={!isFilterEnabled}
-                                        className={`mt-4 w-full rounded-2xl border px-4 py-3 text-sm outline-none transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${inputBg}`}
-                                        style={{ color: 'var(--text-primary)' }}
-                                    />
-                                    <div className="mt-3 px-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
-                                        {t('lyricFilter.example')} <code>{LYRIC_FILTER_REGEX_EXAMPLE}</code>
-                                    </div>
-                                    {error && (
-                                        <div className={`mt-3 text-xs ${dangerText}`}>
-                                            {t('lyricFilter.invalidRegex', { error })}
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-                    </motion.div>
-                </motion.div>
+                        {isSaving ? t('lyricFilter.saving') : t('lyricFilter.save')}
+                    </SheetButton>
+                </>
             )}
-        </AnimatePresence>
+        >
+            {/* Side by side; one above the other in a window too narrow for both. */}
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col border-b border-[var(--st-line)] bg-[var(--st-pv)] md:border-b-0 md:border-r">
+                    <div className="flex shrink-0 items-baseline justify-between gap-4 px-6 pb-1.5 pt-4 text-[13px] text-[color:var(--st-t2)]">
+                        <span className="min-w-0 truncate">
+                            {currentSongTitle ? t('lyricFilter.previewCurrentSong', { title: currentSongTitle }) : t('lyricFilter.previewFallback')}
+                        </span>
+                        {preview.totalCount > 0 && (
+                            <span className="shrink-0 tabular-nums text-[color:var(--st-t1)]">
+                                {t('lyricFilter.filteredCount', { removed: preview.removedCount, total: preview.totalCount })}
+                            </span>
+                        )}
+                    </div>
+                    <div className="st-scroll min-h-0 flex-1 overflow-y-auto px-3">
+                        <LyricFilterPreviewList
+                            isLoading={isLoadingPreview}
+                            rows={preview.rows}
+                            staff={preview.staff}
+                            staffPolicy={draftStaffPolicy}
+                        />
+                    </div>
+                </div>
+
+                <div className="st-scroll min-h-0 flex-1 overflow-y-auto px-5 pb-6 md:w-[440px] md:flex-none">
+                    <LyricFilterRuleSection
+                        isEnabled={isFilterEnabled}
+                        pattern={draftPattern}
+                        error={error}
+                        onToggle={() => setIsFilterEnabled(previous => !previous)}
+                        onPatternChange={setDraftPattern}
+                    />
+                    <LyricStaffSection
+                        policy={draftStaffPolicy}
+                        minDwellSeconds={draftStaffMinDwell}
+                        absorbMode={draftStaffAbsorbMode}
+                        pattern={draftStaffPattern}
+                        onPolicyChange={setDraftStaffPolicy}
+                        onMinDwellChange={setDraftStaffMinDwell}
+                        onAbsorbModeChange={setDraftStaffAbsorbMode}
+                        onPatternChange={setDraftStaffPattern}
+                    />
+                </div>
+            </div>
+        </Sheet>
     );
 };
 

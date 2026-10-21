@@ -1,4 +1,4 @@
-import { Captions, Disc3, Image, SlidersHorizontal } from 'lucide-react';
+import { AudioWaveform, Compass, LogIn, Music2, QrCode, Sparkles } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 // src/components/modal/newFeaturesRelease.ts
@@ -6,22 +6,25 @@ import type { LucideIcon } from 'lucide-react';
 type NewFeatureCard = {
     id: string;
     icon: LucideIcon;
-    daylightIconClassName: string;
-    darkIconClassName: string;
 };
 
 type NewFeaturesRelease = {
     i18nKey: string;
+    /** 重大更新：介绍上方显示「<代号> Update · 重大更新」标签；代号不翻译，文案在 help.majorUpdateLabel。 */
+    majorUpdate?: { codename: string };
     features: NewFeatureCard[];
 };
 
 // Defines the current release's cards; their localized text lives under i18nKey in every locale.
 export const NEW_FEATURES_RELEASE: NewFeaturesRelease = {
-    i18nKey: 'releaseNotes.v0_6_16',
+    i18nKey: 'releaseNotes.v0_7_21',
+    majorUpdate: { codename: 'Sabbat-of-the-witch' },
     features: [
-        { id: 'qqMusicProvider', icon: Disc3, daylightIconClassName: 'text-emerald-600', darkIconClassName: 'text-emerald-400' },
-        { id: 'audioEqualizer', icon: SlidersHorizontal, daylightIconClassName: 'text-sky-600', darkIconClassName: 'text-sky-400' },
-        { id: 'lyricApi', icon: Captions, daylightIconClassName: 'text-violet-600', darkIconClassName: 'text-violet-400' },
-        { id: 'localSongCovers', icon: Image, daylightIconClassName: 'text-amber-600', darkIconClassName: 'text-amber-400' },
+        { id: 'newPlatforms', icon: Music2 },
+        { id: 'loginWindow', icon: LogIn },
+        { id: 'explore', icon: Compass },
+        { id: 'smartBeat', icon: AudioWaveform },
+        { id: 'qqMusic', icon: QrCode },
+        { id: 'moreDetails', icon: Sparkles },
     ],
 };

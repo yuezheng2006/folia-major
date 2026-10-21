@@ -12,6 +12,7 @@ const isPlayerChromeVisibilityMode = (value: string | null): value is PlayerChro
 type UsePlayerChromeAutoHideOptions = {
     autoHidePlayerChrome: boolean;
     initialPlayerChromeHidden: boolean;
+    suppressPointerReveal?: boolean;
     setIsPlayerChromeHidden: React.Dispatch<React.SetStateAction<boolean>>;
     setAutoHidePlayerChromePreference: (enabled: boolean) => void;
     onModeChange?: (mode: PlayerChromeVisibilityMode) => void;
@@ -36,6 +37,7 @@ const getInitialPlayerChromeVisibilityMode = (autoHidePlayerChrome: boolean, ini
 export const usePlayerChromeAutoHide = ({
     autoHidePlayerChrome,
     initialPlayerChromeHidden,
+    suppressPointerReveal = false,
     setIsPlayerChromeHidden,
     setAutoHidePlayerChromePreference,
     onModeChange,
@@ -49,8 +51,11 @@ export const usePlayerChromeAutoHide = ({
     const isSynchronizingPreferenceRef = useRef(false);
     const hasInitializedPreferenceSyncRef = useRef(false);
 
-    const cyclePlayerChromeVisibilityMode = useCallback(() => {
-        const nextMode = getNextPlayerChromeVisibilityMode(playerChromeVisibilityModeRef.current);
+    // One path for the cycle button and for a mode picked directly (the remote window's three-way choice).
+    const setPlayerChromeVisibilityModeTo = useCallback((nextMode: PlayerChromeVisibilityMode) => {
+        if (!isPlayerChromeVisibilityMode(nextMode) || nextMode === playerChromeVisibilityModeRef.current) {
+            return;
+        }
         const shouldAutoHide = nextMode === 'auto-hide';
         playerChromeVisibilityModeRef.current = nextMode;
         setPlayerChromeVisibilityMode(nextMode);
@@ -60,6 +65,10 @@ export const usePlayerChromeAutoHide = ({
         }
         onModeChange?.(nextMode);
     }, [autoHidePlayerChrome, onModeChange, setAutoHidePlayerChromePreference]);
+
+    const cyclePlayerChromeVisibilityMode = useCallback(() => {
+        setPlayerChromeVisibilityModeTo(getNextPlayerChromeVisibilityMode(playerChromeVisibilityModeRef.current));
+    }, [setPlayerChromeVisibilityModeTo]);
 
     useEffect(() => {
         localStorage.setItem(PLAYER_CHROME_VISIBILITY_MODE_STORAGE_KEY, playerChromeVisibilityMode);
@@ -88,6 +97,7 @@ export const usePlayerChromeAutoHide = ({
 
     useEffect(() => {
         let isThrottled = false;
+        let isPointerHeld = false;
 
         const clearAutoHideTimer = () => {
             window.clearTimeout(timeoutIdRef.current);
@@ -96,6 +106,7 @@ export const usePlayerChromeAutoHide = ({
 
         const scheduleAutoHide = (delay: number) => {
             clearAutoHideTimer();
+            if (isPointerHeld) return;
             timeoutIdRef.current = window.setTimeout(() => {
                 timeoutIdRef.current = undefined;
                 setIsPlayerChromeHidden(true);
@@ -115,13 +126,31 @@ export const usePlayerChromeAutoHide = ({
             }
         };
 
-        const handleMouseMove = () => {
+        const handleMouseMove = (event: MouseEvent) => {
+            // A pointer released outside the window does not reliably deliver pointerup here.
+            // Repair the held state as soon as the mouse comes back without a pressed button.
+            if (isPointerHeld && event.buttons === 0) {
+                isPointerHeld = false;
+            }
             if (isThrottled) return;
             isThrottled = true;
             rafIdRef.current = requestAnimationFrame(() => {
                 showAndResetTimer();
                 isThrottled = false;
             });
+        };
+        const handlePointerDown = () => {
+            isPointerHeld = true;
+            clearAutoHideTimer();
+            setIsPlayerChromeHidden(false);
+        };
+        const handlePointerUp = () => {
+            isPointerHeld = false;
+            showAndResetTimer();
+        };
+        const handleWindowBlur = () => {
+            isPointerHeld = false;
+            scheduleAutoHide(300);
         };
 
         if (playerChromeVisibilityMode === 'always-hidden') {
@@ -134,9 +163,22 @@ export const usePlayerChromeAutoHide = ({
             return clearAutoHideTimer;
         }
 
+        // Click-through still forwards mouse-move into the renderer, so auto-hide would read the
+        // cursor passing over an untouchable window as user presence and pop the chrome back up.
+        if (suppressPointerReveal) {
+            clearAutoHideTimer();
+            setIsPlayerChromeHidden(true);
+            return clearAutoHideTimer;
+        }
+
         showAndResetTimer();
         window.addEventListener('mouseout', handleMouseOut);
         window.addEventListener('mousemove', handleMouseMove);
+        window.addEventListener('pointerdown', handlePointerDown);
+        window.addEventListener('pointerup', handlePointerUp);
+        window.addEventListener('pointercancel', handlePointerUp);
+        window.addEventListener('wheel', showAndResetTimer, { passive: true });
+        window.addEventListener('blur', handleWindowBlur);
 
         return () => {
             clearAutoHideTimer();
@@ -146,8 +188,13 @@ export const usePlayerChromeAutoHide = ({
             }
             window.removeEventListener('mouseout', handleMouseOut);
             window.removeEventListener('mousemove', handleMouseMove);
+            window.removeEventListener('pointerdown', handlePointerDown);
+            window.removeEventListener('pointerup', handlePointerUp);
+            window.removeEventListener('pointercancel', handlePointerUp);
+            window.removeEventListener('wheel', showAndResetTimer);
+            window.removeEventListener('blur', handleWindowBlur);
         };
-    }, [playerChromeVisibilityMode, setIsPlayerChromeHidden]);
+    }, [playerChromeVisibilityMode, suppressPointerReveal, setIsPlayerChromeHidden]);
 
-    return { playerChromeVisibilityMode, cyclePlayerChromeVisibilityMode };
+    return { playerChromeVisibilityMode, cyclePlayerChromeVisibilityMode, setPlayerChromeVisibilityModeTo };
 };

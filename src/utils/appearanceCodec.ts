@@ -2,14 +2,18 @@ import {
     DEFAULT_CLADDAGH_TUNING,
     DEFAULT_DIORAMA_TUNING,
     DEFAULT_LATENT_BACKGROUND_TUNING,
+    DEFAULT_SORA_BACKGROUND_TUNING,
     DEFAULT_MONET_BACKGROUND_TUNING,
     DEFAULT_MONET_TUNING,
     DEFAULT_NOMAND_BACKGROUND_TUNING,
     DEFAULT_PENDOLO_TUNING,
+    DEFAULT_SMART_BEAT_SETTINGS,
     DEFAULT_SONNET_TUNING,
+    DEFAULT_TEMPERA_TUNING,
     type DualTheme,
     type Theme,
 } from '../types';
+import { normalizeLumiereTuning } from './lumiereTuning';
 
 // src/utils/appearanceCodec.ts
 // The shareable appearance config codec: theme + visual settings <-> the minified `folia-theme://`
@@ -210,6 +214,9 @@ const compressMonetBackground = (t: any): any => ({
     mbh: t.backgroundHalfPaneOffsetX,
     mbwcm: t.backgroundWashColorMode,
     mbwcc: t.backgroundWashCustomColor,
+    mbde: t.backgroundDriftEnabled,
+    mbds: t.backgroundDriftStrength,
+    mbse: t.backgroundStreaksEnabled,
 });
 const decompressMonetBackground = (o: any): any => ({
     backgroundSource: o.mbs || DEFAULT_MONET_BACKGROUND_TUNING.backgroundSource,
@@ -222,20 +229,39 @@ const decompressMonetBackground = (o: any): any => ({
     backgroundHalfPaneOffsetX: o.mbh !== undefined ? o.mbh : DEFAULT_MONET_BACKGROUND_TUNING.backgroundHalfPaneOffsetX,
     backgroundWashColorMode: o.mbwcm || DEFAULT_MONET_BACKGROUND_TUNING.backgroundWashColorMode,
     backgroundWashCustomColor: o.mbwcc || DEFAULT_MONET_BACKGROUND_TUNING.backgroundWashCustomColor,
+    backgroundDriftEnabled: o.mbde !== undefined ? o.mbde : DEFAULT_MONET_BACKGROUND_TUNING.backgroundDriftEnabled,
+    backgroundDriftStrength: o.mbds !== undefined ? o.mbds : DEFAULT_MONET_BACKGROUND_TUNING.backgroundDriftStrength,
+    backgroundStreaksEnabled: o.mbse !== undefined ? o.mbse : DEFAULT_MONET_BACKGROUND_TUNING.backgroundStreaksEnabled,
 });
 
 const compressNomandBackground = (t: any): any => ({
     is: t.imageSource,
+    ...(t.effect !== undefined ? { e: t.effect } : {}),
     dt: t.ditheringType,
     s: t.size,
     cs: t.colorSteps,
     oc: t.originalColors,
     i: t.inverted,
+    ...(t.flutedGlassSize !== undefined ? { fgs: t.flutedGlassSize } : {}),
+    ...(t.flutedGlassDistortion !== undefined ? { fgd: t.flutedGlassDistortion } : {}),
+    ...(t.flutedGlassBlur !== undefined ? { fgb: t.flutedGlassBlur } : {}),
+    ...(t.paperTextureContrast !== undefined ? { ptc: t.paperTextureContrast } : {}),
+    ...(t.paperTextureRoughness !== undefined ? { ptr: t.paperTextureRoughness } : {}),
+    ...(t.paperTextureFiber !== undefined ? { ptf: t.paperTextureFiber } : {}),
+    ...(t.halftoneDotsSize !== undefined ? { hds: t.halftoneDotsSize } : {}),
+    ...(t.halftoneDotsRadius !== undefined ? { hdr: t.halftoneDotsRadius } : {}),
+    ...(t.halftoneDotsContrast !== undefined ? { hdc: t.halftoneDotsContrast } : {}),
+    ...(t.halftoneDotsOriginalColors !== undefined ? { hdoc: t.halftoneDotsOriginalColors } : {}),
+    ...(t.halftoneDotsInverted !== undefined ? { hdi: t.halftoneDotsInverted } : {}),
+    ...(t.lensDistortionSpread !== undefined ? { lds: t.lensDistortionSpread } : {}),
+    ...(t.lensDistortionBulge !== undefined ? { ldb: t.lensDistortionBulge } : {}),
+    ...(t.lensDistortionDispersion !== undefined ? { ldd: t.lensDistortionDispersion } : {}),
     oe: t.overlayEnabled,
     oo: t.overlayOpacity,
 });
 const decompressNomandBackground = (o: any): any => ({
     imageSource: o.is || DEFAULT_NOMAND_BACKGROUND_TUNING.imageSource,
+    ...(o.e !== undefined ? { effect: o.e } : {}),
     ditheringType: o.dt === '2x2' || o.dt === '4x4' || o.dt === '8x8'
         ? o.dt
         : DEFAULT_NOMAND_BACKGROUND_TUNING.ditheringType,
@@ -243,6 +269,20 @@ const decompressNomandBackground = (o: any): any => ({
     colorSteps: o.cs !== undefined ? o.cs : DEFAULT_NOMAND_BACKGROUND_TUNING.colorSteps,
     originalColors: o.oc !== undefined ? o.oc : DEFAULT_NOMAND_BACKGROUND_TUNING.originalColors,
     inverted: o.i !== undefined ? o.i : DEFAULT_NOMAND_BACKGROUND_TUNING.inverted,
+    ...(o.fgs !== undefined ? { flutedGlassSize: o.fgs } : {}),
+    ...(o.fgd !== undefined ? { flutedGlassDistortion: o.fgd } : {}),
+    ...(o.fgb !== undefined ? { flutedGlassBlur: o.fgb } : {}),
+    ...(o.ptc !== undefined ? { paperTextureContrast: o.ptc } : {}),
+    ...(o.ptr !== undefined ? { paperTextureRoughness: o.ptr } : {}),
+    ...(o.ptf !== undefined ? { paperTextureFiber: o.ptf } : {}),
+    ...(o.hds !== undefined ? { halftoneDotsSize: o.hds } : {}),
+    ...(o.hdr !== undefined ? { halftoneDotsRadius: o.hdr } : {}),
+    ...(o.hdc !== undefined ? { halftoneDotsContrast: o.hdc } : {}),
+    ...(o.hdoc !== undefined ? { halftoneDotsOriginalColors: o.hdoc } : {}),
+    ...(o.hdi !== undefined ? { halftoneDotsInverted: o.hdi } : {}),
+    ...(o.lds !== undefined ? { lensDistortionSpread: o.lds } : {}),
+    ...(o.ldb !== undefined ? { lensDistortionBulge: o.ldb } : {}),
+    ...(o.ldd !== undefined ? { lensDistortionDispersion: o.ldd } : {}),
     overlayEnabled: o.oe !== undefined ? o.oe : DEFAULT_NOMAND_BACKGROUND_TUNING.overlayEnabled,
     overlayOpacity: o.oo !== undefined ? o.oo : DEFAULT_NOMAND_BACKGROUND_TUNING.overlayOpacity,
 });
@@ -284,9 +324,17 @@ const decompressLatentBackground = (o: any): any => ({
     overlayOpacity: o.oo !== undefined ? o.oo : DEFAULT_LATENT_BACKGROUND_TUNING.overlayOpacity,
 });
 
+const compressSoraBackground = (t: any): any => ({
+    bl: t.blank,
+});
+const decompressSoraBackground = (o: any): any => ({
+    blank: o.bl !== undefined ? o.bl : DEFAULT_SORA_BACKGROUND_TUNING.blank,
+});
+
 const compressMonet = (t: any): any => ({
     kce: t.keywordColoringEnabled,
     msd: t.showDescription,
+    mav: t.showAudioVisualization,
     mas: t.audioStyle,
     mfs: t.fontScale,
     mps: t.portraitSource,
@@ -297,6 +345,7 @@ const compressMonet = (t: any): any => ({
 const decompressMonet = (o: any): any => ({
     keywordColoringEnabled: o.kce !== undefined ? o.kce : DEFAULT_MONET_TUNING.keywordColoringEnabled,
     showDescription: o.msd !== undefined ? o.msd : DEFAULT_MONET_TUNING.showDescription,
+    showAudioVisualization: o.mav !== undefined ? o.mav : DEFAULT_MONET_TUNING.showAudioVisualization,
     audioStyle: o.mas || DEFAULT_MONET_TUNING.audioStyle,
     fontScale: o.mfs !== undefined ? o.mfs : DEFAULT_MONET_TUNING.fontScale,
     portraitSource: o.mps || DEFAULT_MONET_TUNING.portraitSource,
@@ -363,6 +412,104 @@ const decompressSonnet = (o: any): any => ({
     postProcessLensDispersion: o.pplx !== undefined ? o.pplx : DEFAULT_SONNET_TUNING.postProcessLensDispersion,
 });
 
+// 智能动感模式 is one setting for every visualizer, not a Sonnet tuning, so it has its own key. Each
+// effect's setting is `[on ? 1 : 0, strength]`; a config from before effects had their own carries
+// the shared 轻拍 / 重拍 pair (`bi` / `dbi`), passed on for the store to fold (resolveSmartBeatSettings).
+const compressSmartBeat = (t: any): any => ({
+    on: t.enabled,
+    ef: Object.fromEntries(Object.entries(t.effects ?? {}).map(([id, e]: [string, any]) => [id, [e.on ? 1 : 0, e.strength]])),
+});
+const decompressSmartBeat = (o: any): any => ({
+    enabled: o.on !== undefined ? o.on : DEFAULT_SMART_BEAT_SETTINGS.enabled,
+    ...(o.ef && typeof o.ef === 'object'
+        ? { effects: Object.fromEntries(Object.entries(o.ef).map(([id, e]: [string, any]) => [id, Array.isArray(e) ? { on: e[0] === 1, strength: e[1] } : e])) }
+        : {}),
+    ...(o.bi !== undefined ? { beatIntensity: o.bi } : {}),
+    ...(o.dbi !== undefined ? { downbeatIntensity: o.dbi } : {}),
+});
+
+const compressTempera = (t: any): any => ({
+    ci: t.cameraIntensity,
+    gm: t.glyphMotion,
+    wll: t.wholeLineLyrics,
+    gss: t.glyphSettleStretch,
+    cm: t.colorMode,
+    sb: t.showBlocks,
+    sd: t.showDecor,
+    scm: t.showCornerMarks,
+    ti: t.textInversion,
+    li: t.layerImages,
+    lid: t.layerImageDepth,
+    lif: t.layerImageFrequency,
+    et: t.enableTransitions,
+    tr: t.textureResolution,
+    ppe: t.postProcessEnabled,
+    pptc: t.postProcessTextureCompression,
+    ppg: t.postProcessGrain,
+    ppc: t.postProcessContrast,
+    ppr: t.postProcessRgbShift,
+    ppv: t.postProcessVignette,
+    ppld: t.postProcessLensDistortion,
+});
+const decompressTempera = (o: any): any => ({
+    cameraIntensity: o.ci !== undefined ? o.ci : DEFAULT_TEMPERA_TUNING.cameraIntensity,
+    glyphMotion: o.gm !== undefined ? o.gm : DEFAULT_TEMPERA_TUNING.glyphMotion,
+    wholeLineLyrics: o.wll !== undefined ? o.wll : DEFAULT_TEMPERA_TUNING.wholeLineLyrics,
+    glyphSettleStretch: o.gss !== undefined ? o.gss : DEFAULT_TEMPERA_TUNING.glyphSettleStretch,
+    colorMode: o.cm !== undefined ? o.cm : DEFAULT_TEMPERA_TUNING.colorMode,
+    showBlocks: o.sb !== undefined ? o.sb : DEFAULT_TEMPERA_TUNING.showBlocks,
+    showDecor: o.sd !== undefined ? o.sd : DEFAULT_TEMPERA_TUNING.showDecor,
+    showCornerMarks: o.scm !== undefined ? o.scm : DEFAULT_TEMPERA_TUNING.showCornerMarks,
+    textInversion: o.ti !== undefined ? o.ti : DEFAULT_TEMPERA_TUNING.textInversion,
+    layerImages: o.li !== undefined ? o.li : DEFAULT_TEMPERA_TUNING.layerImages,
+    layerImageDepth: o.lid !== undefined ? o.lid : DEFAULT_TEMPERA_TUNING.layerImageDepth,
+    layerImageFrequency: o.lif !== undefined ? o.lif : DEFAULT_TEMPERA_TUNING.layerImageFrequency,
+    enableTransitions: o.et !== undefined ? o.et : DEFAULT_TEMPERA_TUNING.enableTransitions,
+    textureResolution: o.tr !== undefined ? o.tr : DEFAULT_TEMPERA_TUNING.textureResolution,
+    postProcessEnabled: o.ppe !== undefined ? o.ppe : DEFAULT_TEMPERA_TUNING.postProcessEnabled,
+    postProcessTextureCompression: o.pptc !== undefined
+        ? o.pptc
+        : DEFAULT_TEMPERA_TUNING.postProcessTextureCompression,
+    postProcessGrain: o.ppg !== undefined ? o.ppg : DEFAULT_TEMPERA_TUNING.postProcessGrain,
+    postProcessContrast: o.ppc !== undefined ? o.ppc : DEFAULT_TEMPERA_TUNING.postProcessContrast,
+    postProcessRgbShift: o.ppr !== undefined ? o.ppr : DEFAULT_TEMPERA_TUNING.postProcessRgbShift,
+    postProcessVignette: o.ppv !== undefined ? o.ppv : DEFAULT_TEMPERA_TUNING.postProcessVignette,
+    postProcessLensDistortion: o.ppld !== undefined ? o.ppld : DEFAULT_TEMPERA_TUNING.postProcessLensDistortion,
+});
+
+// 绘光：短键只在短码里出现；解压后统一走 normalizeLumiereTuning 钳制和补默认值。
+const LUMIERE_SHORT_KEYS = {
+    lightIntensity: 'li',
+    audioResponse: 'ar',
+    fogDensity: 'fd',
+    darkField: 'df',
+    moteAmount: 'ma',
+    bloom: 'bl',
+    textBloom: 'tb',
+    unlitOpacity: 'uo',
+    windowNeighbors: 'wn',
+    decay: 'dc',
+    echo: 'ec',
+    fogOctaves: 'fo',
+    lineArt: 'la',
+    frontBokeh: 'fb',
+    trails: 'tr',
+    hideTrails: 'ht',
+    seamlessTransitions: 'st',
+    overlayFrame: 'of',
+    textOnly: 'txo',
+    keywordColors: 'kc',
+    themeIcons: 'thi',
+    themeColorMix: 'tcm',
+    renderQuality: 'rq',
+} as const;
+const compressLumiere = (t: any): any => Object.fromEntries(
+    Object.entries(LUMIERE_SHORT_KEYS).map(([key, short]) => [short, t[key]]),
+);
+const decompressLumiere = (o: any) => normalizeLumiereTuning(Object.fromEntries(
+    Object.entries(LUMIERE_SHORT_KEYS).map(([key, short]) => [key, o?.[short]]),
+));
+
 export const compressConfig = (config: any): string => {
     const minified: any = {};
     if (config.theme) {
@@ -375,11 +522,17 @@ export const compressConfig = (config: any): string => {
     if (config.randomVisualizerModePerSong !== undefined) minified.rvms = config.randomVisualizerModePerSong;
     if (config.visualizerBackgroundMode) minified.vbm = config.visualizerBackgroundMode;
     if (config.backgroundOpacity !== undefined) minified.bo = config.backgroundOpacity;
+    if (config.useCoverColorBg !== undefined) minified.ccb = config.useCoverColorBg;
+    if (config.disableVisualizerGeometricBackground !== undefined) minified.dvgb = config.disableVisualizerGeometricBackground;
+    if (config.disableVisualizerVignette !== undefined) minified.dvv = config.disableVisualizerVignette;
+    if (config.staticMode !== undefined) minified.stm = config.staticMode;
     if (config.visualizerOpacity !== undefined) minified.vo = config.visualizerOpacity;
     if (config.hidePlayerTranslationSubtitle !== undefined) minified.hpts = config.hidePlayerTranslationSubtitle;
     if (config.showSubtitleTranslation !== undefined) minified.sst = config.showSubtitleTranslation;
     if (config.subtitleContentMode !== undefined) minified.scm = config.subtitleContentMode;
     if (config.subtitleOverlayBackground !== undefined) minified.sob = config.subtitleOverlayBackground;
+    if (config.subtitleUpcomingLyricsBlur !== undefined) minified.sulb = config.subtitleUpcomingLyricsBlur;
+    if (config.subtitleOverlayOpacity !== undefined) minified.soo = config.subtitleOverlayOpacity;
     if (config.showHarmonySubtitle !== undefined) minified.shs = config.showHarmonySubtitle;
     if (config.harmonySubtitleBackground !== undefined) minified.hsb = config.harmonySubtitleBackground;
     if (config.lyricsFontStyle) minified.lfs = config.lyricsFontStyle;
@@ -395,6 +548,8 @@ export const compressConfig = (config: any): string => {
     if (config.subtitleFontFallbackFamilies?.length) minified.sfff = config.subtitleFontFallbackFamilies;
 
     if (config.visualizerTunings) minified.vt = config.visualizerTunings;
+    // Frozen: the 13 lyric-style tunings below predate the visualizerTunings bundle, which carries any
+    // new style. Do not add a lyric style here.
     if (config.classicTuning) minified.ct = compressClassic(config.classicTuning);
     if (config.cadenzaTuning) minified.cat = compressCadenza(config.cadenzaTuning);
     if (config.partitaTuning) minified.pt = compressPartita(config.partitaTuning);
@@ -406,14 +561,29 @@ export const compressConfig = (config: any): string => {
     if (config.monetBackgroundTuning) minified.mbt = compressMonetBackground(config.monetBackgroundTuning);
     if (config.nomandBackgroundTuning) minified.nbt = compressNomandBackground(config.nomandBackgroundTuning);
     if (config.latentBackgroundTuning) minified.lbt = compressLatentBackground(config.latentBackgroundTuning);
+    if (config.soraBackgroundTuning) minified.sbt = compressSoraBackground(config.soraBackgroundTuning);
     if (config.monetTuning) minified.mt = compressMonet(config.monetTuning);
     if (config.pendoloTuning) minified.pdt = compressPendolo(config.pendoloTuning);
     if (config.sonnetTuning) minified.snt = compressSonnet(config.sonnetTuning);
+    if (config.smartBeat) minified.smb = compressSmartBeat(config.smartBeat);
+    if (config.temperaTuning) minified.tmp = compressTempera(config.temperaTuning);
+    if (config.lumiereTuning) minified.lmt = compressLumiere(config.lumiereTuning);
+    // Folium param values are already plain JSON keyed by scope; stored as-is.
+    if (config.foliumParams) minified.fp = config.foliumParams;
     if (config.urlBackgroundList) minified.ubl = config.urlBackgroundList;
     if (config.urlBackgroundSelectedId) minified.ubid = config.urlBackgroundSelectedId;
     if (config.songThemeAutoSwitchEnabled !== undefined) minified.stas = config.songThemeAutoSwitchEnabled;
     if (config.songThemeAutoGenerateEnabled !== undefined) minified.stag = config.songThemeAutoGenerateEnabled;
+    if (config.themeGenerationSource !== undefined) minified.tgs = config.themeGenerationSource;
     if (config.followSystemTheme !== undefined) minified.fst = config.followSystemTheme;
+    if (config.stageTrackPillMode !== undefined) minified.stp = config.stageTrackPillMode;
+    if (config.stageTrackPillTimeoutSec !== undefined) minified.stpt = config.stageTrackPillTimeoutSec;
+    if (config.stageTrackPillOnHome !== undefined) minified.stph = config.stageTrackPillOnHome;
+    if (config.libraryWallStackEdges !== undefined) minified.lwse = config.libraryWallStackEdges;
+    if (config.libraryWallSeamClear !== undefined) minified.lwsc = config.libraryWallSeamClear;
+    if (config.libraryWallSeamStyle !== undefined) minified.lwss = config.libraryWallSeamStyle;
+    if (config.libraryWallBackdropLyrics !== undefined) minified.lwbl = config.libraryWallBackdropLyrics;
+    if (config.libraryWallBackdropBlur !== undefined) minified.lwbb = config.libraryWallBackdropBlur;
 
     const jsonStr = JSON.stringify(minified);
     const bytes = new TextEncoder().encode(jsonStr);
@@ -428,7 +598,8 @@ export const compressConfig = (config: any): string => {
 export const decompressConfig = (str: string): any => {
     let parsed: any = null;
     const trimmed = str.trim();
-    if (trimmed.startsWith('folia-theme://')) {
+    const isCompressedShortcode = trimmed.startsWith('folia-theme://');
+    if (isCompressedShortcode) {
         const base64 = trimmed.slice('folia-theme://'.length);
         const binaryString = atob(base64);
         const bytes = Uint8Array.from(binaryString, char => char.charCodeAt(0));
@@ -442,9 +613,15 @@ export const decompressConfig = (str: string): any => {
         throw new Error('Invalid format');
     }
 
-    const isMinified = parsed.t !== undefined
+    const isMinified = isCompressedShortcode
+        || parsed.t !== undefined
         || parsed.vm !== undefined
         || parsed.rvms !== undefined
+        || parsed.ccb !== undefined
+        || parsed.dvgb !== undefined
+        || parsed.dvv !== undefined
+        || parsed.stm !== undefined
+        || parsed.soo !== undefined
         || parsed.ct !== undefined
         || parsed.cat !== undefined
         || parsed.dot !== undefined
@@ -461,7 +638,20 @@ export const decompressConfig = (str: string): any => {
         || parsed.sfi !== undefined
         || parsed.pdt !== undefined
         || parsed.snt !== undefined
-        || parsed.fst !== undefined;
+        || parsed.smb !== undefined
+        || parsed.fst !== undefined
+        // The now playing card's three keys. Listed like the rest so a hand-written JSON that only
+        // carries the card is still recognised as the minified shape rather than falling through to
+        // the long-name branch, where none of them is a valid key.
+        || parsed.stp !== undefined
+        || parsed.stpt !== undefined
+        || parsed.stph !== undefined
+        // The bravais wall's collection stack edges, info strip and backdrop, for the same reason.
+        || parsed.lwse !== undefined
+        || parsed.lwsc !== undefined
+        || parsed.lwss !== undefined
+        || parsed.lwbl !== undefined
+        || parsed.lwbb !== undefined;
     if (isMinified) {
         const decompressed: any = {};
         if (parsed.t) {
@@ -474,11 +664,17 @@ export const decompressConfig = (str: string): any => {
         if (parsed.rvms !== undefined) decompressed.randomVisualizerModePerSong = parsed.rvms;
         if (parsed.vbm) decompressed.visualizerBackgroundMode = parsed.vbm;
         if (parsed.bo !== undefined) decompressed.backgroundOpacity = parsed.bo;
+        if (parsed.ccb !== undefined) decompressed.useCoverColorBg = parsed.ccb;
+        if (parsed.dvgb !== undefined) decompressed.disableVisualizerGeometricBackground = parsed.dvgb;
+        if (parsed.dvv !== undefined) decompressed.disableVisualizerVignette = parsed.dvv;
+        if (parsed.stm !== undefined) decompressed.staticMode = parsed.stm;
         if (parsed.vo !== undefined) decompressed.visualizerOpacity = parsed.vo;
         if (parsed.hpts !== undefined) decompressed.hidePlayerTranslationSubtitle = parsed.hpts;
         if (parsed.sst !== undefined) decompressed.showSubtitleTranslation = parsed.sst;
         if (parsed.scm !== undefined) decompressed.subtitleContentMode = parsed.scm;
         if (parsed.sob !== undefined) decompressed.subtitleOverlayBackground = parsed.sob;
+        if (parsed.sulb !== undefined) decompressed.subtitleUpcomingLyricsBlur = parsed.sulb;
+        if (parsed.soo !== undefined) decompressed.subtitleOverlayOpacity = parsed.soo;
         if (parsed.shs !== undefined) decompressed.showHarmonySubtitle = parsed.shs;
         if (parsed.hsb !== undefined) decompressed.harmonySubtitleBackground = parsed.hsb;
         if (parsed.lfs) decompressed.lyricsFontStyle = parsed.lfs;
@@ -493,6 +689,8 @@ export const decompressConfig = (str: string): any => {
         if (parsed.sff) decompressed.subtitleFontFamily = parsed.sff;
         if (parsed.sfff) decompressed.subtitleFontFallbackFamilies = parsed.sfff;
 
+        // Frozen: the 13 lyric-style tunings below predate the visualizerTunings bundle, which carries any
+        // new style. Do not add a lyric style here.
         if (parsed.ct) decompressed.classicTuning = decompressClassic(parsed.ct);
         if (parsed.vt) decompressed.visualizerTunings = parsed.vt;
         if (parsed.cat) decompressed.cadenzaTuning = decompressCadenza(parsed.cat);
@@ -505,30 +703,50 @@ export const decompressConfig = (str: string): any => {
         if (parsed.mbt) decompressed.monetBackgroundTuning = decompressMonetBackground(parsed.mbt);
         if (parsed.nbt) decompressed.nomandBackgroundTuning = decompressNomandBackground(parsed.nbt);
         if (parsed.lbt) decompressed.latentBackgroundTuning = decompressLatentBackground(parsed.lbt);
+        if (parsed.sbt) decompressed.soraBackgroundTuning = decompressSoraBackground(parsed.sbt);
         if (parsed.mt) decompressed.monetTuning = decompressMonet(parsed.mt);
         if (parsed.pdt) decompressed.pendoloTuning = decompressPendolo(parsed.pdt);
         if (parsed.snt) decompressed.sonnetTuning = decompressSonnet(parsed.snt);
+        if (parsed.smb) decompressed.smartBeat = decompressSmartBeat(parsed.smb);
+        if (parsed.tmp) decompressed.temperaTuning = decompressTempera(parsed.tmp);
+        if (parsed.lmt) decompressed.lumiereTuning = decompressLumiere(parsed.lmt);
+        if (parsed.fp) decompressed.foliumParams = parsed.fp;
         if (parsed.ubl) decompressed.urlBackgroundList = parsed.ubl;
         if (parsed.ubid) decompressed.urlBackgroundSelectedId = parsed.ubid;
         if (parsed.stas !== undefined) decompressed.songThemeAutoSwitchEnabled = parsed.stas;
         if (parsed.stag !== undefined) decompressed.songThemeAutoGenerateEnabled = parsed.stag;
+        if (parsed.tgs !== undefined) decompressed.themeGenerationSource = parsed.tgs;
         if (parsed.fst !== undefined) decompressed.followSystemTheme = parsed.fst;
+        if (parsed.stp !== undefined) decompressed.stageTrackPillMode = parsed.stp;
+        if (parsed.stpt !== undefined) decompressed.stageTrackPillTimeoutSec = parsed.stpt;
+        if (parsed.stph !== undefined) decompressed.stageTrackPillOnHome = parsed.stph;
+        if (parsed.lwse !== undefined) decompressed.libraryWallStackEdges = parsed.lwse;
+        if (parsed.lwsc !== undefined) decompressed.libraryWallSeamClear = parsed.lwsc;
+        if (parsed.lwss !== undefined) decompressed.libraryWallSeamStyle = parsed.lwss;
+        if (parsed.lwbl !== undefined) decompressed.libraryWallBackdropLyrics = parsed.lwbl;
+        if (parsed.lwbb !== undefined) decompressed.libraryWallBackdropBlur = parsed.lwbb;
 
         return decompressed;
     } else {
+        // Frozen: the 13 lyric-style tunings in this list predate the visualizerTunings bundle, which carries any
+        // new style. Do not add a lyric style here.
         const validKeys = [
             'theme', 'visualizerMode', 'randomVisualizerModePerSong', 'visualizerBackgroundMode', 'backgroundOpacity',
+            'useCoverColorBg', 'disableVisualizerGeometricBackground', 'disableVisualizerVignette', 'staticMode',
             'visualizerOpacity', 'hidePlayerTranslationSubtitle', 'showSubtitleTranslation', 'subtitleContentMode',
-            'subtitleOverlayBackground',
+            'subtitleOverlayBackground', 'subtitleUpcomingLyricsBlur', 'subtitleOverlayOpacity',
             'showHarmonySubtitle', 'harmonySubtitleBackground',
             'lyricsFontStyle', 'lyricsFontScale', 'lyricsFontWeight', 'lyricsFontFallbackFamilies',
             'subtitleFontInheritsLyrics', 'subtitleFontScale', 'subtitleFontStyle', 'subtitleFontWeight', 'subtitleFontFamily',
             'subtitleFontFallbackFamilies', 'visualizerTunings', 'classicTuning',
             'cadenzaTuning', 'partitaTuning', 'fumeTuning', 'claddaghTuning', 'cappellaTuning',
-            'tiltTuning', 'dioramaTuning', 'monetBackgroundTuning', 'nomandBackgroundTuning', 'latentBackgroundTuning', 'monetTuning',
-            'pendoloTuning', 'sonnetTuning',
+            'tiltTuning', 'dioramaTuning', 'monetBackgroundTuning', 'nomandBackgroundTuning', 'latentBackgroundTuning', 'soraBackgroundTuning', 'monetTuning',
+            'pendoloTuning', 'sonnetTuning', 'smartBeat', 'temperaTuning', 'lumiereTuning', 'foliumParams',
             'urlBackgroundList', 'urlBackgroundSelectedId',
-            'songThemeAutoSwitchEnabled', 'songThemeAutoGenerateEnabled', 'followSystemTheme',
+            'songThemeAutoSwitchEnabled', 'songThemeAutoGenerateEnabled', 'themeGenerationSource', 'followSystemTheme',
+            'stageTrackPillMode', 'stageTrackPillTimeoutSec', 'stageTrackPillOnHome',
+            'libraryWallStackEdges',
+            'libraryWallSeamClear', 'libraryWallSeamStyle', 'libraryWallBackdropLyrics', 'libraryWallBackdropBlur',
         ];
         const hasValidKey = validKeys.some(k => parsed[k] !== undefined);
         if (!hasValidKey) {

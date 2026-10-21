@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { importFolder, resyncFolder } from '../../../src/services/localMusicService';
+import { EMBEDDED_METADATA_VERSION, importFolder, resyncFolder } from '../../../src/services/localMusicService';
 import {
     getDirHandles,
     getFromCache,
@@ -43,8 +43,8 @@ vi.mock('../../../src/utils/localMetadataWorkerClient', () => ({
 }));
 
 vi.mock('../../../src/services/localCoverAssetService', () => ({
-    loadLocalSongCoverBlob: vi.fn(),
     prepareLocalCoverBlob: vi.fn(),
+    stageLocalCoverAsset: vi.fn(),
 }));
 
 class FakeFileHandle {
@@ -101,12 +101,12 @@ const createLibrary = (includeFolderCover = false) => new FakeDirectoryHandle('M
 const waitForHydratedSave = async (expectedSongs: number) => {
     await vi.waitFor(() => {
         const hydratedBatch = vi.mocked(saveLocalSongs).mock.calls.find(([songs]) => (
-            songs.length === expectedSongs && songs.every(song => song.embeddedMetadataVersion === 5)
+            songs.length === expectedSongs && songs.every(song => song.embeddedMetadataVersion === EMBEDDED_METADATA_VERSION)
         ));
         expect(hydratedBatch).toBeTruthy();
     });
     return vi.mocked(saveLocalSongs).mock.calls.find(([songs]) => (
-        songs.length === expectedSongs && songs.every(song => song.embeddedMetadataVersion === 5)
+        songs.length === expectedSongs && songs.every(song => song.embeddedMetadataVersion === EMBEDDED_METADATA_VERSION)
     ))![0];
 };
 
@@ -123,6 +123,7 @@ describe('local music cover import', () => {
         vi.mocked(prepareLocalCoverBlob).mockResolvedValue(null);
 
         vi.stubGlobal('window', {
+            electron: {},
             showDirectoryPicker: vi.fn(),
             dispatchEvent: vi.fn(),
         });
@@ -155,7 +156,7 @@ describe('local music cover import', () => {
             `sha256:${'1'.repeat(64)}`,
             `sha256:${'2'.repeat(64)}`,
         ]));
-        expect(hydratedSongs.every(song => song.embeddedCover instanceof Blob)).toBe(true);
+        expect(hydratedSongs.every(song => song.localCoverAssetId?.startsWith('sha256:'))).toBe(true);
     });
 
     it('hashes a folder cover once and skips embedded images for every song in that folder', async () => {
@@ -175,7 +176,24 @@ describe('local music cover import', () => {
         expect(hydratedSongs.every(song => (
             song.localCoverAssetId === folderAssetId
             && song.localCoverSource === 'folder'
-            && song.embeddedCover === folderBlob
+        ))).toBe(true);
+    });
+
+    it('marks a folder cover for rescan when hashing does not produce an asset id', async () => {
+        const handle = createLibrary(true);
+        const folderBlob = new Blob(['folder-cover'], { type: 'image/jpeg' });
+        vi.mocked((window as any).showDirectoryPicker).mockResolvedValue(handle as unknown as FileSystemDirectoryHandle);
+        vi.mocked(prepareLocalCoverBlob).mockResolvedValue({ blob: folderBlob });
+        vi.mocked(parseEmbeddedMetadataAsync).mockResolvedValue({ duration: 1, album: 'Shared Album' });
+
+        await importFolder();
+        const hydratedSongs = await waitForHydratedSave(2);
+
+        expect(prepareLocalCoverBlob).toHaveBeenCalledOnce();
+        expect(hydratedSongs.every(song => (
+            song.localCoverAssetId === undefined
+            && song.localCoverSource === 'folder'
+            && song.localCoverNeedsAssetMigration === true
         ))).toBe(true);
     });
 
@@ -203,8 +221,11 @@ describe('local music cover import', () => {
         expect(hydratedSong.localCoverNeedsAssetMigration).toBe(true);
     });
 
-    it('retries cover hydration for an unchanged song carrying the migration marker', async () => {
-        const fileName = '01 Retry Cover.mp3';
+    it.each([
+        { reason: 'pending cover migration', version: EMBEDDED_METADATA_VERSION, needsMigration: true },
+        { reason: 'FLAC metadata parser upgrade', version: 5, needsMigration: undefined },
+    ])('retries cover hydration for an unchanged song after $reason', async ({ version, needsMigration }) => {
+        const fileName = '01 Retry Cover.flac';
         const handle = new FakeDirectoryHandle('Music', [
             new FakeDirectoryHandle('Album', [new FakeFileHandle(fileName)]),
         ]);
@@ -222,8 +243,8 @@ describe('local music cover import', () => {
             fileSignature: `Music/Album/${fileName}::5::1000`,
             mimeType: 'audio/mpeg',
             addedAt: 1,
-            embeddedMetadataVersion: 5,
-            localCoverNeedsAssetMigration: true,
+            embeddedMetadataVersion: version,
+            localCoverNeedsAssetMigration: needsMigration,
         };
         const previousSnapshot: LocalLibrarySnapshot = {
             rootFolderName: 'Music',
@@ -265,6 +286,7 @@ describe('local music cover import', () => {
         expect(parseEmbeddedMetadataAsync).toHaveBeenCalledOnce();
         expect(hydratedSong.localCoverAssetId).toBe(assetId);
         expect(hydratedSong.localCoverNeedsAssetMigration).toBeUndefined();
+        expect(hydratedSong.embeddedMetadataVersion).toBe(EMBEDDED_METADATA_VERSION);
     });
 
     it('re-parses embedded covers when a previously indexed folder cover is removed', async () => {
@@ -283,7 +305,7 @@ describe('local music cover import', () => {
             fileSignature: `Music/Album/${fileName}::5::1000`,
             mimeType: 'audio/mpeg',
             addedAt: 1,
-            embeddedMetadataVersion: 5,
+            embeddedMetadataVersion: EMBEDDED_METADATA_VERSION,
             localCoverAssetId: `sha256:${'a'.repeat(64)}`,
             localCoverSource: 'folder',
         }));
@@ -339,5 +361,47 @@ describe('local music cover import', () => {
             `sha256:${'4'.repeat(64)}`,
             `sha256:${'5'.repeat(64)}`,
         ]));
+    });
+
+    it('applies backpressure while a hydration batch is being saved', async () => {
+        const fileCount = 100;
+        const handle = new FakeDirectoryHandle('Music', [
+            new FakeDirectoryHandle('Album', Array.from({ length: fileCount }, (_, index) => (
+                new FakeFileHandle(`${String(index + 1).padStart(3, '0')} Song.mp3`)
+            ))),
+        ]);
+        let releaseFirstHydrationSave!: () => void;
+        let notifyFirstHydrationSave!: () => void;
+        const firstHydrationSaveStarted = new Promise<void>(resolve => { notifyFirstHydrationSave = resolve; });
+        const firstHydrationSaveBlocked = new Promise<void>(resolve => { releaseFirstHydrationSave = resolve; });
+        let blockedFirstHydrationSave = false;
+        let hydratedSaveSongCount = 0;
+        vi.mocked((window as any).showDirectoryPicker).mockResolvedValue(handle as unknown as FileSystemDirectoryHandle);
+        vi.mocked(parseEmbeddedMetadataAsync).mockImplementation(async file => {
+            const index = Number.parseInt(file.name, 10);
+            return {
+                duration: 1,
+                cover: new Blob([file.name], { type: 'image/png' }),
+                coverAssetId: `sha256:${index.toString(16).padStart(64, '0')}`,
+            };
+        });
+        vi.mocked(saveLocalSongs).mockImplementation(async songs => {
+            const isHydrationBatch = songs.some(song => song.embeddedMetadataVersion === EMBEDDED_METADATA_VERSION);
+            if (isHydrationBatch) hydratedSaveSongCount += songs.length;
+            if (isHydrationBatch && !blockedFirstHydrationSave) {
+                blockedFirstHydrationSave = true;
+                notifyFirstHydrationSave();
+                await firstHydrationSaveBlocked;
+            }
+        });
+
+        await importFolder();
+        await firstHydrationSaveStarted;
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        expect(vi.mocked(parseEmbeddedMetadataAsync).mock.calls.length).toBeLessThanOrEqual(55);
+        releaseFirstHydrationSave();
+        await vi.waitFor(() => expect(parseEmbeddedMetadataAsync).toHaveBeenCalledTimes(fileCount));
+        await vi.waitFor(() => expect(hydratedSaveSongCount).toBe(fileCount));
     });
 });

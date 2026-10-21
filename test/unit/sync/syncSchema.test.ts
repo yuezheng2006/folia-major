@@ -27,6 +27,7 @@ describe('sync schema parsing', () => {
                 showSubtitleTranslation: true,
                 subtitleContentMode: 'romanization',
                 subtitleOverlayBackground: true,
+                subtitleUpcomingLyricsBlur: false,
                 lyricsFontStyle: 'fantasy',
                 lyricsFontWeight: 650,
                 subtitleFontStyle: 'serif',
@@ -48,6 +49,7 @@ describe('sync schema parsing', () => {
             showSubtitleTranslation: true,
             subtitleContentMode: 'romanization',
             subtitleOverlayBackground: true,
+            subtitleUpcomingLyricsBlur: false,
             subtitleFontStyle: 'serif',
             lyricsFontWeight: 650,
             subtitleFontWeight: null,
@@ -58,6 +60,17 @@ describe('sync schema parsing', () => {
             },
             grid3dCardStyle: 'image',
         });
+    });
+
+    it('accepts the dual-row subtitle content mode and rejects unknown ones', () => {
+        const parse = (subtitleContentMode: string) => parseSyncedSettingsRecord({
+            schemaVersion: 1,
+            updatedAt: '2026-07-08T00:00:00.000Z',
+            data: { subtitleContentMode },
+        })?.data.subtitleContentMode;
+
+        expect(parse('both')).toBe('both');
+        expect(parse('triple')).toBeUndefined();
     });
 
     it('migrates the deprecated carousel home layout to grid', () => {

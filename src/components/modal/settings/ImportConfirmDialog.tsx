@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Check, ChevronDown, Info, Minus, Undo2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { SheetButton } from '../../shared/Sheet';
 import ThemedDialog from '../../shared/ThemedDialog';
 import { getVisualizerModeLabel, hasVisualizerMode } from '../../visualizer/registry';
 import { getVisualizerBackgroundModeLabel, hasVisualizerBackgroundMode } from '../../visualizer/backgrounds/registry';
 import { ACTIVATE_CUSTOM_THEME_KEY, THEME_DARK_KEY, THEME_LIGHT_KEY, type ImportChange, type ImportGroup, type ImportPlan } from '../../../utils/appearanceImportPlan';
 import { resolveSettingLabelKey, resolveSettingValueLabelKey } from '../../../utils/settingLabelLookup';
+import { isLibraryWallSeamStyle, LIBRARY_WALL_SEAM_STYLE_LABEL_KEYS } from '../../../utils/libraryWallSeamStyle';
 
 // src/components/modal/settings/ImportConfirmDialog.tsx
 // What an imported config would change, before it is applied, chosen field by field. Rows spell out
@@ -30,6 +32,8 @@ const GROUP_LABEL_KEYS: Record<ImportGroup, string> = {
     fonts: 'options.importGroupFonts',
     background: 'options.importGroupBackground',
     songTheme: 'options.importGroupSongTheme',
+    trackCard: 'options.importGroupTrackCard',
+    libraryWall: 'options.importGroupLibraryWall',
 };
 
 const DERIVED_LABEL_KEYS: Record<string, string> = {
@@ -45,16 +49,24 @@ const FIELD_LABEL_KEYS: Record<string, string> = {
     followSystemTheme: 'options.followSystemTheme',
     visualizerMode: 'options.visualizerMode',
     visualizerOpacity: 'options.visualizerOpacity',
+    smartBeat: 'options.smartBeat',
     hidePlayerTranslationSubtitle: 'options.hidePlayerTranslationSubtitle',
     showSubtitleTranslation: 'options.showSubtitleTranslation',
     subtitleContentMode: 'options.subtitleContentMode',
     subtitleOverlayBackground: 'options.subtitleOverlayBackground',
+    subtitleOverlayOpacity: 'options.subtitleOverlayOpacity',
     showHarmonySubtitle: 'options.showHarmonySubtitle',
     harmonySubtitleBackground: 'options.harmonySubtitleBackground',
     subtitleFontInheritsLyrics: 'options.subtitleFontInheritsLyrics',
     subtitleFontFamily: 'options.subtitleFontFamily',
     visualizerBackgroundMode: 'options.visualizerBackgroundMode',
     backgroundOpacity: 'options.backgroundOpacity',
+    // The cover-color toggle is the one background row whose label lives outside the options
+    // namespace -- the settings card reuses the theme panel's wording for it.
+    useCoverColorBg: 'theme.addCoverColor',
+    disableVisualizerGeometricBackground: 'options.disableVisualizerGeometricBackground',
+    disableVisualizerVignette: 'options.disableVisualizerVignette',
+    staticMode: 'options.staticMode',
     lyricsCustomFontFamily: 'options.customFont',
     songThemeAutoSwitchEnabled: 'options.autoSwitchSongTheme',
     songThemeAutoGenerateEnabled: 'options.autoGenerateSongTheme',
@@ -73,10 +85,23 @@ const FIELD_LABEL_KEYS: Record<string, string> = {
     monetBackgroundTuning: 'options.importFieldMonetBackgroundTuning',
     nomandBackgroundTuning: 'options.importFieldNomandBackgroundTuning',
     latentBackgroundTuning: 'options.importFieldLatentBackgroundTuning',
+    soraBackgroundTuning: 'options.importFieldSoraBackgroundTuning',
+    // The card's three rows reuse the settings panel's own wording. The mode row borrows the
+    // section heading, which is what that group of three buttons is actually labelled by.
+    stageTrackPillMode: 'options.stageTrackPill',
+    stageTrackPillTimeoutSec: 'options.stageTrackPillTimeout',
+    stageTrackPillOnHome: 'options.stageTrackPillOnHome',
+    libraryWallStackEdges: 'options.bravaisStackEdges',
+    libraryWallSeamClear: 'options.bravaisSeamClear',
+    libraryWallSeamStyle: 'options.bravaisSeamStyle',
+    libraryWallBackdropLyrics: 'options.bravaisBackdropLyrics',
+    libraryWallBackdropBlur: 'options.bravaisBackdropBlur',
 };
 
 // The per-renderer tunings borrow the renderer's own display name instead of inventing one.
 const TUNING_MODES: Record<string, string> = {
+    // Frozen: the 13 lyric-style tunings below predate the visualizerTunings bundle, which carries any
+    // new style. Do not add a lyric style here.
     classicTuning: 'classic',
     cadenzaTuning: 'cadenza',
     partitaTuning: 'partita',
@@ -88,6 +113,8 @@ const TUNING_MODES: Record<string, string> = {
     monetTuning: 'monet',
     pendoloTuning: 'pendolo',
     sonnetTuning: 'sonnet',
+    temperaTuning: 'tempera',
+    lumiereTuning: 'lumiere',
 };
 
 interface BoxTone {
@@ -257,6 +284,9 @@ const ImportConfirmDialog: React.FC<ImportConfirmDialogProps> = ({
         if (key === 'visualizerBackgroundMode' && typeof value === 'string' && hasVisualizerBackgroundMode(value)) {
             return <span className={cls}>{getVisualizerBackgroundModeLabel(value, k => t(k))}</span>;
         }
+        if (key === 'libraryWallSeamStyle' && isLibraryWallSeamStyle(value)) {
+            return <span className={cls}>{t(LIBRARY_WALL_SEAM_STYLE_LABEL_KEYS[value])}</span>;
+        }
         if (isHexColor(value)) {
             return (
                 <span className={`inline-flex items-center gap-1 ${cls}`}>
@@ -348,27 +378,22 @@ const ImportConfirmDialog: React.FC<ImportConfirmDialogProps> = ({
             isDaylight={isDaylight}
             title={t('options.importConfirmTitle')}
             description={t('options.importConfirmDesc')}
-            maxWidthClass="max-w-xl"
+            size="m"
             footer={(
                 <>
-                    <button
-                        type="button"
-                        onClick={onCancel}
-                        className={`rounded-xl px-4 py-2 text-sm font-medium transition-colors ${isDaylight ? 'hover:bg-zinc-200/60' : 'hover:bg-white/10'}`}
-                    >
+                    <SheetButton onClick={onCancel}>
                         {t('status.cancel')}
-                    </button>
-                    <button
-                        type="button"
+                    </SheetButton>
+                    <SheetButton
+                        variant="primary"
                         onClick={() => onConfirm([...selected])}
                         // Nothing to pick is not the same as picking nothing: a plan whose changes
                         // are all derived, or which has none at all, still has to be dismissable
                         // through the confirm button rather than only through cancel.
                         disabled={selectableKeys.length > 0 && selected.size === 0}
-                        className="rounded-xl bg-white/15 px-4 py-2 text-sm font-semibold transition-colors hover:bg-white/25 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                         {t('options.importApplySelected')}
-                    </button>
+                    </SheetButton>
                 </>
             )}
         >

@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useRef, useInsertionEffect } from 'react';
+import React, { useMemo, useState, useRef, useInsertionEffect, useLayoutEffect } from 'react';
 import { motion, AnimatePresence, MotionValue, motionValue } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { prepareWithSegments, layoutWithLines } from '@chenglou/pretext';
@@ -11,6 +11,7 @@ import { type VisualizerSharedProps } from '../definition';
 import { useVisualizerRuntime } from '../runtime';
 import VisualizerShell from '../VisualizerShell';
 import VisualizerSubtitleOverlay from '../VisualizerSubtitleOverlay';
+import { resolveSubtitleFontSizes } from '../subtitleFontSizes';
 
 const CHAR_REF_LENGTH = 20;
 const LOG_OFFSET = 4;
@@ -551,6 +552,7 @@ const VisualizerTilt: React.FC<VisualizerTiltProps & { staticMode?: boolean; }> 
         subtitleFontScale = 1,
         subtitleOverlayOpacity,
         subtitleOverlayBackground,
+        subtitleUpcomingLyricsBlur,
         isPlayerChromeHidden = false,
         hideTranslationSubtitle = false,
         showSubtitleTranslation = true,
@@ -599,7 +601,8 @@ const VisualizerTilt: React.FC<VisualizerTiltProps & { staticMode?: boolean; }> 
         });
     }, [activeLine, layout]);
 
-    useInsertionEffect(() => {
+    // A layout effect, not an insertion effect: the handler sets state, which React refuses from an insertion effect.
+    useLayoutEffect(() => {
         const handler = (latest: number) => {
             if (!segmentTimings || !activeLine) {
                 setVisibleSegmentIndex(-1);
@@ -624,8 +627,7 @@ const VisualizerTilt: React.FC<VisualizerTiltProps & { staticMode?: boolean; }> 
         return unsubscribe;
     }, [currentTime, segmentTimings, activeLine]);
 
-    const translationFontSize = `clamp(${(1.125 * lyricsFontScale).toFixed(3)}rem, ${(2.6 * lyricsFontScale).toFixed(3)}vw, ${(1.25 * lyricsFontScale).toFixed(3)}rem)`;
-    const upcomingFontSize = `clamp(${(0.875 * lyricsFontScale).toFixed(3)}rem, ${(2 * lyricsFontScale).toFixed(3)}vw, ${(1 * lyricsFontScale).toFixed(3)}rem)`;
+    const { translationFontSize, upcomingFontSize } = resolveSubtitleFontSizes(lyricsFontScale);
 
     return (
         <VisualizerShell
@@ -686,6 +688,7 @@ const VisualizerTilt: React.FC<VisualizerTiltProps & { staticMode?: boolean; }> 
                 upcomingFontSize={upcomingFontSize}
                 subtitleOverlayOpacity={subtitleOverlayOpacity}
                 subtitleOverlayBackground={subtitleOverlayBackground}
+                subtitleUpcomingLyricsBlur={subtitleUpcomingLyricsBlur}
                 subtitleFontScale={subtitleFontScale}
                 isPlayerChromeHidden={isPlayerChromeHidden}
                 hideTranslationSubtitle={hideTranslationSubtitle}

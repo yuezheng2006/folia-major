@@ -1,8 +1,110 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('electron', {
+    webUtils: {
+      // File.path was removed in modern Electron; this is the supported way to
+      // resolve the OS path of a dropped file from the renderer.
+      getPathForFile: (file) => webUtils.getPathForFile(file),
+    },
+    // Beat This! on the CPU, automix's fallback when the renderer's GPU path cannot run. Returns null
+    // whenever the weights are not there, which is the browser build's permanent answer.
+    runBeatThis: (chunks) => ipcRenderer.invoke('automix-beat-this', chunks),
+    // The same model's WebGPU export ({ weights, manifest }) for the renderer's own GPU runtime, or null.
+    getBeatThisGpuWeights: (model) => ipcRenderer.invoke('automix-beat-this-gpu-weights', model),
+    getHtdemucsGpuWeights: () => ipcRenderer.invoke('automix-beat-this-gpu-weights', 'htdemucs'),
+    separateStems: (request) => ipcRenderer.invoke('automix-htdemucs', request),
+    // Whether automix is switched on. While it is, the analysis worker keeps htdemucs loaded; switching
+    // it off releases it. See electron/analysis/host.cjs.
+    setAutomixEnabled: (enabled) => ipcRenderer.send('automix-enabled', enabled === true),
+    // Which weights exist, answered without loading them. See the handler for why the settings page
+    // is not allowed to infer this from "am I running in Electron".
+    getAutomixModelsPresent: () => ipcRenderer.invoke('automix-models-present'),
+    // One-way stage marks from the automix session into the runtime log. See services/automix/diag.ts.
+    diagMark: (text) => ipcRenderer.send('automix-diag', text),
+    // Old automix models left in the folder an earlier version let the listener choose. See main.cjs.
+    checkLegacyModels: () => ipcRenderer.invoke('legacy-models-check'),
+    resolveLegacyModels: (action) => ipcRenderer.invoke('legacy-models-resolve', action),
+    openLegacyModelsFolder: () => ipcRenderer.invoke('legacy-models-open'),
+    // Developer debug module: the runtime log and the memory monitor. See electron/debug/debugHost.cjs.
+    debugGetState: () => ipcRenderer.invoke('debug-get-state'),
+    debugSetState: (patch) => ipcRenderer.invoke('debug-set-state', patch),
+    debugOpenLogs: (which) => ipcRenderer.invoke('debug-open-logs', which),
+    // Batched by the caller - one message per line would cost more than the logging it records.
+    debugWriteRuntimeLines: (lines) => ipcRenderer.send('debug-runtime-lines', lines),
+    // The main process's console lines, for the log panel: what was said so far, then each burst.
+    onDebugMainLines: (callback) => {
+        // After a reload the window is still listed from its last page, and a burst sent to it can
+        // arrive ahead of the backlog this page asks for, which holds the same lines.
+        let caughtUp = false;
+        const listener = (_event, lines, isBacklog) => {
+            caughtUp ||= isBacklog === true;
+            if (caughtUp) callback(lines);
+        };
+        ipcRenderer.on('debug-main-lines', listener);
+        ipcRenderer.send('debug-main-lines-ready');
+        return () => ipcRenderer.removeListener('debug-main-lines', listener);
+    },
+    /**
+     * What only this process can answer about itself.
+     *
+     * `app.getAppMetrics()` reports `privateBytes` on Windows and nowhere else - it is guarded
+     * `#if IS_WIN` in Chromium. `ProcessMemoryInfo.private` has no such guard, and on macOS the
+     * docs say it is the MORE meaningful of the two figures, because in-memory page compression
+     * makes the resident set there smaller than the memory actually in use. The catch is that it
+     * only ever describes the calling process, which is why this is asked of the renderer rather
+     * than read off the metrics table.
+     */
+    debugRendererMemory: async () => {
+        try {
+            const memory = await process.getProcessMemoryInfo();
+            const blink = process.getBlinkMemoryInfo();
+            return {
+                pid: process.pid,
+                privateKB: memory.private,
+                sharedKB: memory.shared,
+                blinkAllocatedKB: blink.allocated,
+            };
+        } catch {
+            return null;
+        }
+    },
+    debugReportRendererMemory: (report) => ipcRenderer.send('debug-renderer-memory', report),
+    onDebugMemorySample: (callback) => {
+        const listener = (_event, sample) => callback(sample);
+        ipcRenderer.on('debug-memory-sample', listener);
+        return () => ipcRenderer.removeListener('debug-memory-sample', listener);
+    },
+    platform: process.platform,
+    isLinuxX11: process.platform === 'linux' && !process.env.WAYLAND_DISPLAY,
     getSettings: () => ipcRenderer.invoke('get-settings'),
     saveSettings: (key, value) => ipcRenderer.invoke('save-settings', key, value),
+    onWallpaperModeChanged: (callback) => {
+        const listener = (_event, settings) => callback(settings);
+        ipcRenderer.on('wallpaper-mode-changed', listener);
+        return () => ipcRenderer.removeListener('wallpaper-mode-changed', listener);
+    },
+    onWallpaperTransparentRefused: (callback) => {
+        const listener = (_event, settings) => callback(settings);
+        ipcRenderer.on('wallpaper-transparent-refused', listener);
+        return () => ipcRenderer.removeListener('wallpaper-transparent-refused', listener);
+    },
+    onWallpaperEntryRequested: (callback) => {
+        const listener = () => callback();
+        ipcRenderer.on('wallpaper-entry-requested', listener);
+        return () => ipcRenderer.removeListener('wallpaper-entry-requested', listener);
+    },
+    onWallpaperInputMonitorRequested: (callback) => {
+        const listener = () => callback();
+        ipcRenderer.on('wallpaper-input-monitor-requested', listener);
+        return () => ipcRenderer.removeListener('wallpaper-input-monitor-requested', listener);
+    },
+    getWallpaperDisplays: () => ipcRenderer.invoke('wallpaper-displays-get'),
+    setWallpaperDisplay: (displayId) => ipcRenderer.invoke('wallpaper-display-set', displayId),
+    onWallpaperDisplaysChanged: (callback) => {
+        const listener = (_event, state) => callback(state);
+        ipcRenderer.on('wallpaper-displays-changed', listener);
+        return () => ipcRenderer.removeListener('wallpaper-displays-changed', listener);
+    },
     setPlaybackDisplaySleepBlockingActive: (active) => ipcRenderer.invoke('playback-display-sleep-set-active', active),
     setAppLocale: (localeKey) => ipcRenderer.invoke('set-app-locale', localeKey),
     getCacheDirectory: () => ipcRenderer.invoke('get-cache-directory'),
@@ -22,19 +124,32 @@ contextBridge.exposeInMainWorld('electron', {
     },
     getAudioCache: (cacheKey) => ipcRenderer.invoke('get-audio-cache', cacheKey),
     hasAudioCache: (cacheKey) => ipcRenderer.invoke('has-audio-cache', cacheKey),
-    saveAudioCache: (cacheKey, data, mimeType) => ipcRenderer.invoke('save-audio-cache', cacheKey, data, mimeType),
+    saveAudioCache: (cacheKey, data, mimeType, limitBytes) => ipcRenderer.invoke('save-audio-cache', cacheKey, data, mimeType, limitBytes),
+    removeAudioCache: (cacheKey, size) => ipcRenderer.invoke('remove-audio-cache', cacheKey, size),
     getAudioCacheUsage: () => ipcRenderer.invoke('get-audio-cache-usage'),
     getAudioCacheStats: () => ipcRenderer.invoke('get-audio-cache-stats'),
     clearAudioCache: () => ipcRenderer.invoke('clear-audio-cache'),
+    requestTranscodeFallback: (request) => ipcRenderer.invoke('transcode-fallback-request', request),
+    cancelTranscodeFallback: (requestId) => ipcRenderer.invoke('transcode-fallback-cancel', requestId),
     getCoverCache: (cacheKey) => ipcRenderer.invoke('get-cover-cache', cacheKey),
     saveCoverCache: (cacheKey, data, mimeType) => ipcRenderer.invoke('save-cover-cache', cacheKey, data, mimeType),
     removeCoverCache: (cacheKey) => ipcRenderer.invoke('remove-cover-cache', cacheKey),
     getCoverCacheUsage: () => ipcRenderer.invoke('get-cover-cache-usage'),
     clearCoverCache: () => ipcRenderer.invoke('clear-cover-cache'),
+    hasLocalCoverAsset: (assetId) => ipcRenderer.invoke('has-local-cover-asset', assetId),
+    saveLocalCoverAsset: (assetId, data, mimeType) => ipcRenderer.invoke('save-local-cover-asset', assetId, data, mimeType),
+    removeLocalCoverAsset: (assetId) => ipcRenderer.invoke('remove-local-cover-asset', assetId),
+    clearLocalCoverAssets: () => ipcRenderer.invoke('clear-local-cover-assets'),
     generateTheme: (lyricsText, options) => ipcRenderer.invoke('generate-theme', lyricsText, options),
+    segmentLyrics: (lines) => ipcRenderer.invoke('segment-lyrics', lines),
+    testAiConnection: (settings) => ipcRenderer.invoke('ai-test-connection', settings),
     fetchLyricProxy: (url, init) => ipcRenderer.invoke('lyric-proxy-fetch', url, init),
     getNeteasePort: () => ipcRenderer.invoke('get-netease-port'),
     getNeteaseApiStatus: () => ipcRenderer.invoke('get-netease-api-status'),
+    getLoginDiagnostics: (providerId) => ipcRenderer.invoke('get-login-diagnostics', providerId),
+    runLoginSelfCheck: (providerId) => ipcRenderer.invoke('run-login-self-check', providerId),
+    // 'needed': a request needs the local service and finds it down (see startsAgainWhenNeeded).
+    restartNeteaseApi: (reason) => ipcRenderer.invoke('restart-netease-api', reason),
     onNeteaseApiStatusChanged: (callback) => {
         const listener = (_event, status) => callback(status);
         ipcRenderer.on('netease-api-status-changed', listener);
@@ -42,6 +157,9 @@ contextBridge.exposeInMainWorld('electron', {
     },
     getKugouApiStatus: () => ipcRenderer.invoke('kugou-api-status'),
     kugouRequest: (operation, params) => ipcRenderer.invoke('kugou-api-request', operation, params),
+    bodianRequest: (operation, params) => ipcRenderer.invoke('bodian-api-request', operation, params),
+    ytmRequest: (operation, params) => ipcRenderer.invoke('ytm-api-request', operation, params),
+    spotifyRequest: (operation, params) => ipcRenderer.invoke('spotify-api-request', operation, params),
     getQqPort: () => ipcRenderer.invoke('get-qq-port'),
     getQqApiStatus: () => ipcRenderer.invoke('get-qq-api-status'),
     onQqApiStatusChanged: (callback) => {
@@ -53,7 +171,14 @@ contextBridge.exposeInMainWorld('electron', {
     toggleMaximizeWindow: () => ipcRenderer.invoke('window-toggle-maximize'),
     toggleFullscreenWindow: () => ipcRenderer.invoke('window-toggle-fullscreen'),
     closeWindow: () => ipcRenderer.invoke('window-close'),
+    quitApp: () => ipcRenderer.invoke('app-quit'),
     isWindowMaximized: () => ipcRenderer.invoke('window-is-maximized'),
+    isWindowFullscreen: () => ipcRenderer.invoke('window-is-fullscreen'),
+    onWindowFullscreenChanged: (callback) => {
+        const listener = (_event, fullscreen) => callback(fullscreen);
+        ipcRenderer.on('window-fullscreen-changed', listener);
+        return () => ipcRenderer.removeListener('window-fullscreen-changed', listener);
+    },
     getWindowTransparentMode: () => ipcRenderer.invoke('window-get-transparent-mode'),
     setWindowTransparentMode: (enabled, handoff) => ipcRenderer.invoke('window-set-transparent-mode', enabled, handoff),
     consumeWindowPlaybackHandoff: () => ipcRenderer.invoke('window-playback-handoff-consume'),
@@ -82,7 +207,7 @@ contextBridge.exposeInMainWorld('electron', {
     publishObsBrowserSourceAudio: (audio) => ipcRenderer.invoke('obs-browser-source-publish-audio', audio),
     getLyricApiStatus: () => ipcRenderer.invoke('lyric-api-get-status'),
     setLyricApiEnabled: (enabled) => ipcRenderer.invoke('lyric-api-set-enabled', enabled),
-    publishLyricApiData: (lyrics) => ipcRenderer.invoke('lyric-api-publish', lyrics),
+    publishLyricApiData: (lyrics, offset) => ipcRenderer.invoke('lyric-api-publish', lyrics, offset),
     onLyricApiStatusChanged: (callback) => {
         const listener = (_event, status) => callback(status);
         ipcRenderer.on('lyric-api-status-changed', listener);
@@ -123,6 +248,18 @@ contextBridge.exposeInMainWorld('electron', {
     closeRemoteControl: () => ipcRenderer.invoke('remote-control-close'),
     getRemoteControlAlwaysOnTop: () => ipcRenderer.invoke('remote-control-get-always-on-top'),
     setRemoteControlAlwaysOnTop: (alwaysOnTop) => ipcRenderer.invoke('remote-control-set-always-on-top', alwaysOnTop),
+    getRemoteControlWindowSettings: () => ipcRenderer.invoke('remote-control-get-window-settings'),
+    onRemoteControlWindowSettingsChanged: (callback) => {
+        const listener = (_event, settings) => callback(settings);
+        ipcRenderer.on('remote-control-window-settings-changed', listener);
+        return () => ipcRenderer.removeListener('remote-control-window-settings-changed', listener);
+    },
+    getRemoteControlPointerInside: () => ipcRenderer.invoke('remote-control-get-pointer-inside'),
+    onRemoteControlPointerInside: (callback) => {
+        const listener = (_event, inside) => callback(Boolean(inside));
+        ipcRenderer.on('remote-control-pointer-inside', listener);
+        return () => ipcRenderer.removeListener('remote-control-pointer-inside', listener);
+    },
     publishRemoteControlSnapshot: (snapshot) => ipcRenderer.invoke('remote-control-publish-snapshot', snapshot),
     getRemoteControlSnapshot: () => ipcRenderer.invoke('remote-control-get-snapshot'),
     sendRemoteControlCommand: (command) => ipcRenderer.invoke('remote-control-send-command', command),
@@ -137,10 +274,13 @@ contextBridge.exposeInMainWorld('electron', {
         return () => ipcRenderer.removeListener('remote-control-snapshot', listener);
     },
     chooseVideoExportPath: (defaultName, extension, displayName) => ipcRenderer.invoke('video-export-choose-path', defaultName, extension, displayName),
-    getMainWindowCaptureSource: () => ipcRenderer.invoke('video-export-get-main-window-source'),
+    reportDevicePixelRatio: (ratio) => ipcRenderer.invoke('report-device-pixel-ratio', ratio),
     prepareVideoExportWindow: (size) => ipcRenderer.invoke('video-export-prepare-window', size),
     restoreVideoExportWindow: () => ipcRenderer.invoke('video-export-restore-window'),
-    writeVideoExportFile: (filePath, data) => ipcRenderer.invoke('video-export-write-file', filePath, data),
+    openVideoExportFile: (filePath) => ipcRenderer.invoke('video-export-open-file', filePath),
+    appendVideoExportChunk: (sessionId, data) => ipcRenderer.invoke('video-export-append-chunk', sessionId, data),
+    finishVideoExportFile: (sessionId) => ipcRenderer.invoke('video-export-finish-file', sessionId),
+    abortVideoExportFile: (sessionId) => ipcRenderer.invoke('video-export-abort-file', sessionId),
     getStageStatus: () => ipcRenderer.invoke('stage-get-status'),
     setStageEnabled: (enabled) => ipcRenderer.invoke('stage-set-enabled', enabled),
     regenerateStageToken: () => ipcRenderer.invoke('stage-regenerate-token'),
@@ -175,4 +315,40 @@ contextBridge.exposeInMainWorld('electron', {
         return () => ipcRenderer.removeListener('stage-player-queue-request', listener);
     },
     debugGetRenderedFonts: (selector) => ipcRenderer.invoke('debug-get-rendered-fonts', selector),
+    mods: {
+        listMods: () => ipcRenderer.invoke('folia-mods:list'),
+        setModEnabled: (modId, enabled) => ipcRenderer.invoke('folia-mods:set-enabled', modId, enabled),
+        reloadMods: () => ipcRenderer.invoke('folia-mods:reload'),
+        invokeModRpc: (modId, name, args) => ipcRenderer.invoke('folia-mods:rpc', modId, name, args),
+        invokeModStorage: (modId, operation, key, value) => ipcRenderer.invoke('folia-mods:storage', modId, operation, key, value),
+        invokeModNetFetch: (modId, url, init) => ipcRenderer.invoke('folia-mods:net-fetch', modId, url, init),
+        invokeModPickFile: (modId, accept, persist) => ipcRenderer.invoke('folia-mods:pick-file', modId, accept, persist),
+        invokeModRestoreFile: (modId, grantId) => ipcRenderer.invoke('folia-mods:restore-file', modId, grantId),
+        invokeModReleaseFile: (modId, grantId) => ipcRenderer.invoke('folia-mods:release-file', modId, grantId),
+        cancelExport: () => ipcRenderer.invoke('folia-mods:export-cancel'),
+        pushRuntimeSnapshot: (snapshot) => ipcRenderer.invoke('folia-mods:push-runtime-snapshot', snapshot),
+        getFfmpegStatus: () => ipcRenderer.invoke('folia-mods:ffmpeg-status'),
+        openModsDirectory: () => ipcRenderer.invoke('folia-mods:open-directory'),
+        installModFromZip: (zipPath) => ipcRenderer.invoke('folia-mods:install-zip', zipPath),
+        getModStorageUsage: (modId) => ipcRenderer.invoke('folia-mods:storage-usage', modId),
+        clearModCache: (modId) => ipcRenderer.invoke('folia-mods:clear-cache', modId),
+        getModCallStats: () => ipcRenderer.invoke('folia-mods:call-stats'),
+        reportModsStartSettled: () => ipcRenderer.invoke('folia-mods:start-settled'),
+        reportModsStartAlive: () => ipcRenderer.invoke('folia-mods:start-alive'),
+        onModsStateChanged: (callback) => {
+            const listener = (_event, mods) => callback(mods);
+            ipcRenderer.on('folia-mods:state-changed', listener);
+            return () => ipcRenderer.removeListener('folia-mods:state-changed', listener);
+        },
+        onExportProgress: (callback) => {
+            const listener = (_event, progress) => callback(progress);
+            ipcRenderer.on('folia-mods:export-progress', listener);
+            return () => ipcRenderer.removeListener('folia-mods:export-progress', listener);
+        },
+        onModLog: (callback) => {
+            const listener = (_event, entry) => callback(entry);
+            ipcRenderer.on('folia-mods:log', listener);
+            return () => ipcRenderer.removeListener('folia-mods:log', listener);
+        },
+    },
 });

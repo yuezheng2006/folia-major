@@ -2,6 +2,7 @@ import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion, useMotionValueEvent, useDragControls, useMotionValue } from 'framer-motion';
 import { RotateCcw } from 'lucide-react';
+import { useElementWidth } from '../../../hooks/useElementWidth';
 import { DEFAULT_MONET_TUNING } from '../../../types';
 import { colorWithAlpha } from '../colorMix';
 import { type VisualizerSharedProps } from '../definition';
@@ -9,11 +10,20 @@ import { useVisualizerRuntime } from '../runtime';
 import VisualizerShell from '../VisualizerShell';
 import { getLineRenderEndTime } from '../../../utils/lyrics/renderHints';
 import { resolveThemeFontStack, resolveThemeTranslationFontStack } from '../../../utils/fontStacks';
-import { resolveLyricAlternateText, resolveSubtitleContentMode } from '../../../utils/lyrics/alternateText';
+import { resolveSubtitleContentMode } from '../../../utils/lyrics/alternateText';
 import AudioOverlay from './AudioOverlay';
 import MonetFloatingDecor from './MonetFloatingDecor';
 import MonetLyricsRail from './MonetLyricsRail';
-import { buildMonetVisibleLineEntries, resolveClampFontPx } from './monetLyricsModel';
+import MonetPortraitImage from './MonetPortraitImage';
+import {
+    MONET_PORTRAIT_BASE_MAX_PX,
+    MONET_PORTRAIT_INNER_BASE_MAX_PX,
+    MONET_ROW_BASE_MAX_WIDTH_PX,
+    buildMonetVisibleLineEntries,
+    resolveClampFontPx,
+    resolveMonetLargeScreenScale,
+} from './monetLyricsModel';
+import { monetTextShowsIncoming, resolveMonetSongText } from './monetSongHandoff';
 
 // src/components/visualizer/monet/VisualizerMonet.tsx
 // Monet keeps the poster layout here while its lyric rail owns measured scrolling and line states.
@@ -24,20 +34,12 @@ type VisualizerMonetProps = VisualizerSharedProps;
 
 const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
     const {
-        currentTime,
-        currentLineIndex,
-        lines,
-        theme,
-        subtitleTheme,
         subtitleFontScale = 1,
         audioPower,
         audioBands,
         showText = true,
         showSubtitleTranslation = true,
         subtitleContentMode,
-        songTitle,
-        songArtist,
-        songAlbum,
         coverUrl,
         staticMode = false,
         isPreviewMode = false,
@@ -45,19 +47,46 @@ const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
         monetPortraitImage = null,
         onMonetTuningChange,
         onLyricLineSeek,
-        seed,
+        songHandoff = null,
     } = props;
     const { t } = useTranslation();
-    const resolvedSubtitleContentMode = resolveSubtitleContentMode(subtitleContentMode, showSubtitleTranslation);
-    const displayLines = useMemo(() => {
-        if (resolvedSubtitleContentMode !== 'romanization') {
-            return lines;
+
+    // Through a blend the words stay on the song on screen until the audio crossover, then show the
+    // incoming one (monetSongHandoff.ts). Held as state so the hand-off's every frame renders nothing.
+    const handoffProgress = songHandoff?.progress ?? null;
+    // Read off the hand-off in the render it appears in: mounted (or handed one) past the crossover, a
+    // first render on the outgoing song would play its intro, and the incoming song's a frame later.
+    const readCrossed = () => (handoffProgress ? monetTextShowsIncoming(handoffProgress.get()) : false);
+    const [handoffCrossed, setHandoffCrossed] = useState(readCrossed);
+    const [crossedFor, setCrossedFor] = useState(handoffProgress);
+    if (crossedFor !== handoffProgress) {
+        setCrossedFor(handoffProgress);
+        setHandoffCrossed(readCrossed());
+    }
+    useEffect(() => {
+        if (!handoffProgress) {
+            setHandoffCrossed(false);
+            return undefined;
         }
-        return lines.map(line => ({
-            ...line,
-            translation: resolveLyricAlternateText(line, resolvedSubtitleContentMode) ?? undefined,
-        }));
-    }, [lines, resolvedSubtitleContentMode]);
+        const check = (value: number) => setHandoffCrossed(monetTextShowsIncoming(value));
+        check(handoffProgress.get());
+        return handoffProgress.on('change', check);
+    }, [handoffProgress]);
+    const {
+        currentTime,
+        currentLineIndex,
+        lines,
+        songTitle,
+        songArtist,
+        songAlbum,
+        seed,
+        theme,
+        subtitleTheme,
+    } = resolveMonetSongText(props, songHandoff, handoffCrossed);
+    // Monet sets its subtitle rows inside the lyric animation itself, not in the shared bottom subtitle.
+    // The resolved mode goes to the rail, which measures and renders the rows (romanization, translation,
+    // or both stacked) from each line's own data, so the lines are passed through untouched.
+    const resolvedSubtitleContentMode = resolveSubtitleContentMode(subtitleContentMode, showSubtitleTranslation);
 
     const handleSetMonetTuning = onMonetTuningChange;
 
@@ -73,6 +102,7 @@ const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
 
     const dragControls = useDragControls();
     const isDraggingRef = useRef(false);
+    const shellRef = useRef<HTMLDivElement | null>(null);
 
     const [introKey, setIntroKey] = useState(0);
     const lastTimeRef = useRef(0);
@@ -88,9 +118,13 @@ const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
 
     const songIdentifier = seed ?? songTitle ?? '';
 
-    useEffect(() => {
+    // A new song remounts the poster in the same render, not in an effect: an effect runs after the
+    // commit, so the new song's text was painted for one frame in the old nodes before they remounted.
+    const [introSong, setIntroSong] = useState(songIdentifier);
+    if (introSong !== songIdentifier) {
+        setIntroSong(songIdentifier);
         setIntroKey(prev => prev + 1);
-    }, [songIdentifier]);
+    }
 
     const {
         activeLine,
@@ -100,12 +134,12 @@ const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
     } = useVisualizerRuntime({
         currentTime,
         currentLineIndex,
-        lines: displayLines,
+        lines,
         getLineEndTime: getLineRenderEndTime,
     });
 
     const visibleLineEntries = useMemo(() => buildMonetVisibleLineEntries({
-        lines: displayLines,
+        lines,
         currentLineIndex,
         activeLine,
         recentCompletedLine,
@@ -117,24 +151,45 @@ const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
         activeLine,
         currentLineIndex,
         currentTimeValue,
-        displayLines,
+        lines,
         recentCompletedLine,
         upcomingLine,
     ]);
 
+    const shellWidth = useElementWidth(shellRef);
     const lyricFontStack = useMemo(() => resolveThemeFontStack(theme), [theme]);
     const translationFontStack = useMemo(
         () => resolveThemeTranslationFontStack(subtitleTheme ?? theme),
         [subtitleTheme, theme],
     );
     const fontScale = monetTuning.fontScale;
+    // Scales the whole composition up on very wide displays; 1 below 2xl, so nothing else changes.
+    // Driven by the observed shell width so a resize re-lays the scene out instead of keeping the
+    // width read at mount, and so an embedded preview scales by its own box, not by the display.
+    const largeScreenScale = resolveMonetLargeScreenScale(shellWidth);
     const lyricFontPx = resolveClampFontPx(
         1.34,
         2.75,
         2.28,
-    ) * fontScale;
-    const inactiveFontPx = resolveClampFontPx(1.08, 2, 1.48) * fontScale;
-    const translationFontPx = resolveClampFontPx(0.94, 1.28, 1.14) * fontScale * subtitleFontScale;
+    ) * fontScale * largeScreenScale;
+    const inactiveFontPx = resolveClampFontPx(1.08, 2, 1.48) * fontScale * largeScreenScale;
+    const translationFontPx = resolveClampFontPx(0.94, 1.28, 1.14) * fontScale * subtitleFontScale * largeScreenScale;
+    const rowMaxWidthPx = Math.round(MONET_ROW_BASE_MAX_WIDTH_PX * largeScreenScale);
+    const portraitMaxPx = Math.round(MONET_PORTRAIT_BASE_MAX_PX * largeScreenScale);
+    const portraitInnerMaxPx = Math.round(MONET_PORTRAIT_INNER_BASE_MAX_PX * largeScreenScale);
+    const titleMaxRem = (2.8 * largeScreenScale).toFixed(3);
+    const artistMaxRem = (1.8 * largeScreenScale).toFixed(3);
+
+    // Width the poster header (artist / title / album) must leave free on its right.
+    // A square portrait is drawn 135.135% of its column and pulled left by the extra 35.135%,
+    // and a saved drag offset moves it further left, so both bleed over the text column; without
+    // this reserve a long title runs under the cover. The 3rem subtracted back is the part of the
+    // bleed that only eats the two columns' own padding, plus a small gutter before the cover.
+    const portraitBleedCss = monetTuning.portraitStyle === 'square'
+        ? `0.35135 * clamp(210px, 26vw, ${portraitInnerMaxPx}px) - 3rem`
+        : '0px';
+    const portraitShiftPx = Math.abs(Math.min(0, initialOffsetX));
+    const headerMaxWidth = `max(12rem, calc(100% - max(0px, calc(${portraitBleedCss})) - ${portraitShiftPx}px))`;
 
     /* eslint-disable-next-line no-warning-comments -- @AI: KEEP THIS EXACTLY AS IS */
     // @note Version Control: Project Folia version 0.5.27-a16525c
@@ -142,9 +197,15 @@ const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
     const primaryMetaLabel = songArtist?.trim() || 'Monet';
     const secondaryMetaLabel = songAlbum?.trim() || 'Monet';
     const capsuleLabel = theme.description?.trim() || theme.name?.trim() || 'Monet';
+    // Through a blend the cover is the incoming song's from its start, fading in along the hand-off,
+    // as the background does (VisualizerRenderer). An incoming song without one leaves the outgoing
+    // cover up until the crossover, where the words change too.
+    const portraitCoverUrl = songHandoff
+        ? songHandoff.coverUrl ?? (handoffCrossed ? null : coverUrl)
+        : coverUrl;
     const portraitUrl = monetTuning.portraitSource === 'custom'
-        ? monetPortraitImage?.url ?? coverUrl
-        : coverUrl ?? monetPortraitImage?.url;
+        ? monetPortraitImage?.url ?? portraitCoverUrl
+        : portraitCoverUrl ?? monetPortraitImage?.url;
 
     return (
         <VisualizerShell
@@ -164,18 +225,25 @@ const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
                 </motion.div>
             )}
 
-            <div className="relative z-10 flex h-full w-full items-center justify-center overflow-hidden">
-                <div className="flex h-full w-full max-w-[1520px] flex-row items-center overflow-hidden">
+            <div ref={shellRef} className="relative z-10 flex h-full w-full items-center justify-center overflow-hidden">
+                <div
+                    className="flex h-full w-full flex-row items-center overflow-hidden"
+                    style={{ maxWidth: `${rowMaxWidthPx}px` }}
+                >
                     {showText && (
-                        <div className="flex min-h-0 min-w-0 flex-1 flex-col justify-center px-5 py-5 sm:px-8 sm:py-6 lg:px-14 lg:py-8">
-                            <div className="mb-3 space-y-1.5">
+                        <div className="flex min-h-0 min-w-0 flex-1 flex-col justify-center px-5 py-5 sm:px-8 sm:py-6 lg:px-14 lg:py-8 2xl:px-20">
+                            <div className="mb-3 space-y-1.5" style={{ maxWidth: headerMaxWidth }}>
                                 <motion.div
                                     key={`artist-${introKey}`}
                                     initial={{ opacity: 0, x: -30, y: -10 }}
                                     animate={{ opacity: 1, x: 0, y: 0 }}
                                     transition={{ duration: 1.2, ease: [0.25, 1, 0.5, 1], delay: 0.15 }}
-                                    className="text-[clamp(1rem,1.8vw,1.8rem)] italic"
-                                    style={{ color: colorWithAlpha(theme.primaryColor, 0.96), letterSpacing: 0 }}
+                                    className="truncate italic"
+                                    style={{
+                                        color: colorWithAlpha(theme.primaryColor, 0.96),
+                                        fontSize: `clamp(1rem, 1.8vw, ${artistMaxRem}rem)`,
+                                        letterSpacing: 0,
+                                    }}
                                 >
                                     {primaryMetaLabel}
                                 </motion.div>
@@ -197,21 +265,34 @@ const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
                                 initial={{ opacity: 0, x: -40 }}
                                 animate={{ opacity: 1, x: 0 }}
                                 transition={{ duration: 1.3, ease: [0.25, 1, 0.5, 1], delay: 0.3 }}
+                                style={{ maxWidth: headerMaxWidth }}
                             >
-                                <div className="mb-6 space-y-1">
+                                {/* Flex column so the title's negative top margin below stays local instead of
+                                    collapsing through this wrapper and shifting the whole centered text column. */}
+                                <div className="mb-6 flex flex-col space-y-1">
+                                    {/* `line-clamp-2` needs `overflow: hidden`, and the poster line-height (1.06) is
+                                        tighter than the em box of most serif faces, so half-leading goes negative and
+                                        the clip box cuts into the glyphs — descenders (g, j, p, y, CJK) at the bottom,
+                                        accented caps at the top. Grow the padding box on both sides to hold them.
+                                        The top is pulled back in full; the bottom only most of the way, so the
+                                        ~0.13em left over keeps a descender from crowding the album line below. */}
                                     <div
-                                        className="font-semibold leading-[1.06]"
+                                        className="line-clamp-2 font-semibold leading-[1.06]"
                                         style={{
                                             color: theme.primaryColor,
-                                            fontSize: 'clamp(1.45rem, 3.3vw, 2.8rem)',
+                                            fontSize: `clamp(1.45rem, 3.3vw, ${titleMaxRem}rem)`,
                                             letterSpacing: 0,
+                                            overflowWrap: 'anywhere',
+                                            paddingBlock: '0.25em',
+                                            marginTop: '-0.25em',
+                                            marginBottom: '-0.12em',
                                             textShadow: `0 14px 36px ${colorWithAlpha(theme.backgroundColor, 0.28)}`,
                                         }}
                                     >
                                         {songTitle || 'Monet'}
                                     </div>
                                     <div
-                                        className="text-sm uppercase"
+                                        className="truncate text-sm uppercase"
                                         style={{ color: colorWithAlpha(theme.secondaryColor, 0.84), letterSpacing: 0 }}
                                     >
                                         {secondaryMetaLabel}
@@ -227,7 +308,7 @@ const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
                             >
                                 <MonetLyricsRail
                                     entries={visibleLineEntries}
-                                    lines={displayLines}
+                                    lines={lines}
                                     currentLineIndex={currentLineIndex}
                                     currentTime={currentTime}
                                     theme={theme}
@@ -239,11 +320,12 @@ const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
                                     subtitleTheme={subtitleTheme}
                                     keywordColoringEnabled={monetTuning.keywordColoringEnabled}
                                     emptyText=""
-                                    showSubtitleTranslation={resolvedSubtitleContentMode !== 'none'}
+                                    subtitleContentMode={resolvedSubtitleContentMode}
                                     audioPower={audioPower}
                                     audioBands={audioBands}
                                     onLyricLineSeek={onLyricLineSeek}
                                     seekDisabled={isPreviewMode}
+                                    layoutScale={largeScreenScale}
                                 />
                             </motion.div>
 
@@ -273,15 +355,23 @@ const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
 
                     {showText ? (
                         <motion.div
-                            key={`portrait-${introKey}`}
+                            // Deliberately not keyed on `introKey` like the rest of the poster: a
+                            // remount throws the cover away and slides an empty frame back in,
+                            // which is the flash at a track change. The frame stays put and
+                            // MonetPortraitImage hands the cover over inside it instead, so the
+                            // handover is continuous whether the change came from a skip or from
+                            // an AutoMix/Crossfade blend (along the blend, see portraitCoverUrl).
                             initial={{ opacity: 0, x: 50, scale: 0.95, rotate: 1 }}
                             animate={{ opacity: 1, x: 0, scale: 1, rotate: 0 }}
                             transition={{ duration: 1.6, ease: [0.25, 1, 0.5, 1], delay: 0.25 }}
                             className="hidden min-w-0 items-center justify-center overflow-visible px-3 pr-5 sm:pr-8 md:flex lg:justify-end lg:pr-10 xl:pr-12 select-none"
-                            style={{ flex: '0 0 clamp(220px, 28vw, 430px)' }}
+                            style={{ flex: `0 0 clamp(220px, 28vw, ${portraitMaxPx}px)` }}
                         >
                             {/* Bounding box wrapper that stays in the default position */}
-                            <div className="relative w-full max-w-[clamp(210px,26vw,380px)]">
+                            <div
+                                className="relative w-full"
+                                style={{ maxWidth: `clamp(210px, 26vw, ${portraitInnerMaxPx}px)` }}
+                            >
                                 
                                 {/* Dashed movable region border */}
                                 {isEditingPosition && (
@@ -421,27 +511,21 @@ const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
                                             />
                                         )}
 
-                                        {/* Square cover with enhanced shadow, no transparent border */}
+                                        {/* Square cover with enhanced shadow, no transparent border. Its theme
+                                            colours follow a theme change over a second, as the backdrop's do. */}
                                         {monetTuning.portraitStyle === 'square' ? (
                                             <div
-                                                className="relative w-full aspect-square overflow-hidden rounded-[2rem] bg-center"
+                                                className="relative w-full aspect-square overflow-hidden rounded-[2rem] bg-center transition-[box-shadow,background-color] duration-1000"
                                                 style={{
                                                     boxShadow: `0 36px 80px ${colorWithAlpha(theme.backgroundColor, 0.45)}, 0 20px 42px ${colorWithAlpha(theme.accentColor, 0.22)}, 0 0 0 1px ${colorWithAlpha(theme.primaryColor, 0.06)}`,
                                                     backgroundColor: colorWithAlpha(theme.primaryColor, 0.08),
                                                 }}
                                             >
-                                                <img
-                                                    src={portraitUrl || ''}
-                                                    decoding="async"
-                                                    alt=""
-                                                    className="w-full h-full object-cover"
-                                                    style={{ opacity: portraitUrl ? 1 : 0, transition: 'opacity 1s ease' }}
-                                                    draggable={false}
-                                                />
+                                                <MonetPortraitImage src={portraitUrl} progress={songHandoff?.progress} />
                                             </div>
                                         ) : (
                                             <div
-                                                className="relative w-full aspect-[0.74] p-1.5 rounded-[2.15rem] border backdrop-blur-sm"
+                                                className="relative w-full aspect-[0.74] p-1.5 rounded-[2.15rem] border backdrop-blur-sm transition-[box-shadow,background-color,border-color] duration-1000"
                                                 style={{
                                                     borderColor: colorWithAlpha(theme.primaryColor, 0.1),
                                                     backgroundColor: colorWithAlpha(theme.backgroundColor, 0.15),
@@ -449,19 +533,12 @@ const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
                                                 }}
                                             >
                                                 <div
-                                                    className="w-full h-full overflow-hidden rounded-[1.85rem] bg-center"
+                                                    className="w-full h-full overflow-hidden rounded-[1.85rem] bg-center transition-colors duration-1000"
                                                     style={{
                                                         backgroundColor: colorWithAlpha(theme.primaryColor, 0.08),
                                                     }}
                                                 >
-                                                    <img
-                                                        src={portraitUrl || ''}
-                                                        decoding="async"
-                                                        alt=""
-                                                        className="w-full h-full object-cover"
-                                                        style={{ opacity: portraitUrl ? 1 : 0, transition: 'opacity 1s ease' }}
-                                                        draggable={false}
-                                                    />
+                                                    <MonetPortraitImage src={portraitUrl} progress={songHandoff?.progress} />
                                                 </div>
                                             </div>
                                         )}
@@ -473,7 +550,7 @@ const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
                 </div>
             </div>
 
-            {showText && (
+            {showText && monetTuning.showAudioVisualization && (
                 <motion.div
                     key={`audio-${introKey}`}
                     initial={{ opacity: 0, y: 15 }}

@@ -1,36 +1,39 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { AudioLines, Power, RotateCcw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { Theme } from '../../types';
-import { useSettingsUiStore } from '../../stores/useSettingsUiStore';
-import { colorWithAlpha, mixColors } from '../visualizer/colorMix';
 import {
-    AUDIO_EQUALIZER_BANDS,
-    AUDIO_EQUALIZER_MAX_GAIN_DB,
-    AUDIO_EQUALIZER_MIN_GAIN_DB,
-    AUDIO_EQUALIZER_PRESETS,
+    AUDIO_EQUALIZER_CUSTOM_SLOT_IDS,
+    getAudioEqualizerCustomSlotIndex,
+    isAudioEqualizerCustomSlotId,
+    type AudioEqualizerCustomSlotId,
     type AudioEqualizerModeId,
     type AudioEqualizerSettings,
 } from '../../utils/audioEqualizer';
-import ThemedDialog from '../shared/ThemedDialog';
+import { AUDIO_SOUND_PRESETS, AUDIO_SOUND_PRESET_IDS } from '../../utils/audioPresets';
+import { createNeutralAudioEffects, type AudioEffectId, type AudioEffectSettings } from '../../utils/audioEffects';
+import Sheet from '../shared/Sheet';
+import { Toggle } from '../modal/settings/kit';
+import AudioEffectGrid from './equalizer/AudioEffectGrid';
+import EqualizerBandGrid from './equalizer/EqualizerBandGrid';
+import PresetChips from './equalizer/PresetChips';
+import { useAudioSettingsStore } from '../../stores/useAudioSettingsStore';
 
 // src/components/panelTab/AudioEqualizerDialog.tsx
-// Provides the compact ten-band equalizer editor opened from the controls tab.
+// The audio effect window opened from the controls tab, on the app's sheet: the processing switch
+// in the header, then the presets, the ten EQ bands and the effect chain. It owns the draft that
+// the parts edit and writes it to the store when an edit is let go.
 
 type AudioEqualizerDialogProps = {
     isDaylight: boolean;
-    theme: Theme;
 };
 
-const PRESET_IDS: AudioEqualizerModeId[] = ['flat', 'lofi', 'radio', 'vinyl', 'vocal', 'bass', 'custom'];
+const PRESET_IDS: AudioEqualizerModeId[] = [...AUDIO_SOUND_PRESET_IDS, ...AUDIO_EQUALIZER_CUSTOM_SLOT_IDS];
 
-const AudioEqualizerDialog: React.FC<AudioEqualizerDialogProps> = ({ isDaylight, theme }) => {
+const AudioEqualizerDialog: React.FC<AudioEqualizerDialogProps> = ({ isDaylight }) => {
     const { t } = useTranslation();
-    const settings = useSettingsUiStore(state => state.audioEqualizerSettings);
-    const isOpen = useSettingsUiStore(state => state.isAudioEqualizerOpen);
-    const close = useSettingsUiStore(state => state.closeAudioEqualizer);
-    const commitSettings = useSettingsUiStore(state => state.handleSetAudioEqualizerSettings);
+    const settings = useAudioSettingsStore(state => state.audioEqualizerSettings);
+    const isOpen = useAudioSettingsStore(state => state.isAudioEqualizerOpen);
+    const close = useAudioSettingsStore(state => state.closeAudioEqualizer);
+    const commitSettings = useAudioSettingsStore(state => state.handleSetAudioEqualizerSettings);
     const [draft, setDraft] = useState<AudioEqualizerSettings>(settings);
     const draftRef = useRef(draft);
 
@@ -45,149 +48,119 @@ const AudioEqualizerDialog: React.FC<AudioEqualizerDialogProps> = ({ isDaylight,
                 enabled: settings.enabled,
                 gains: [...settings.gains],
                 preset: settings.preset,
-                customGains: [...settings.customGains],
+                effects: { ...settings.effects },
+                customSlots: settings.customSlots.map(slot => ({ gains: [...slot.gains], effects: { ...slot.effects } })),
             });
         }
     }, [isOpen, settings]);
 
-    const updateBandDraft = (index: number, value: number) => {
-        const gains = [...draftRef.current.gains];
-        gains[index] = value;
+    // Edits are always written into a custom slot: the active one, or the first while a built-in plays.
+    const writeCustomDraft = (gains: number[], effects: AudioEffectSettings) => {
+        const slotId: AudioEqualizerCustomSlotId = isAudioEqualizerCustomSlotId(draftRef.current.preset)
+            ? draftRef.current.preset
+            : AUDIO_EQUALIZER_CUSTOM_SLOT_IDS[0];
+        const slotIndex = getAudioEqualizerCustomSlotIndex(slotId);
         updateDraft({
             ...draftRef.current,
             enabled: true,
             gains,
-            preset: 'custom',
-            customGains: [...gains],
+            effects,
+            preset: slotId,
+            customSlots: draftRef.current.customSlots.map((slot, index) => (
+                index === slotIndex ? { gains: [...gains], effects: { ...effects } } : slot
+            )),
         });
     };
 
+    const updateBandDraft = (index: number, value: number) => {
+        const gains = [...draftRef.current.gains];
+        gains[index] = value;
+        writeCustomDraft(gains, { ...draftRef.current.effects });
+    };
+
+    const updateEffectDraft = (id: AudioEffectId, value: number) => {
+        writeCustomDraft([...draftRef.current.gains], { ...draftRef.current.effects, [id]: value });
+    };
+
     const applyPreset = (presetId: AudioEqualizerModeId) => {
-        const next = {
+        const source = isAudioEqualizerCustomSlotId(presetId)
+            ? draftRef.current.customSlots[getAudioEqualizerCustomSlotIndex(presetId)]
+            : AUDIO_SOUND_PRESETS[presetId];
+        const next: AudioEqualizerSettings = {
             ...draftRef.current,
             enabled: true,
             preset: presetId,
-            gains: presetId === 'custom'
-                ? [...draftRef.current.customGains]
-                : [...AUDIO_EQUALIZER_PRESETS[presetId]],
+            gains: [...source.gains],
+            effects: { ...source.effects },
         };
         updateDraft(next);
         commitSettings(next);
     };
 
-    const selectedAccentColor = isDaylight
-        ? mixColors(theme.accentColor, '#18181b', 0.52)
-        : theme.accentColor;
-    const inactiveText = isDaylight ? 'text-zinc-600' : 'text-white/45';
-    const trackClass = isDaylight ? 'bg-zinc-300' : 'bg-white/10';
-    const surfaceClass = isDaylight
-        ? 'border-zinc-300 bg-zinc-100/90 text-zinc-800'
-        : 'border-white/10 bg-white/[0.05]';
-    const buttonClass = isDaylight
-        ? 'border-zinc-300 bg-zinc-100/90 text-zinc-700 hover:border-zinc-400 hover:bg-zinc-200'
-        : 'border-white/10 bg-white/[0.05] hover:bg-white/[0.1]';
-    const gainTextClass = isDaylight ? 'text-zinc-700' : 'text-white';
+    // Reset only ever clears a custom slot; the built-in presets are not editable, so nothing to undo.
+    const resetActiveCustomSlot = () => {
+        const slotId = isAudioEqualizerCustomSlotId(draftRef.current.preset) ? draftRef.current.preset : null;
+        if (!slotId) return;
 
-    if (typeof document === 'undefined') {
-        return null;
-    }
+        const slotIndex = getAudioEqualizerCustomSlotIndex(slotId);
+        const gains = [...AUDIO_SOUND_PRESETS.flat.gains];
+        const effects = createNeutralAudioEffects();
+        const next: AudioEqualizerSettings = {
+            ...draftRef.current,
+            gains,
+            effects,
+            customSlots: draftRef.current.customSlots.map((slot, index) => (
+                index === slotIndex ? { gains: [...gains], effects: { ...effects } } : slot
+            )),
+        };
+        updateDraft(next);
+        commitSettings(next);
+    };
 
-    return createPortal((
-        <ThemedDialog
+    // The switch stops the processing and keeps every value.
+    const setEnabled = (enabled: boolean) => {
+        const next = { ...draftRef.current, enabled };
+        updateDraft(next);
+        commitSettings(next);
+    };
+
+    const commitDraft = () => commitSettings(draftRef.current);
+
+    return (
+        <Sheet
             isOpen={isOpen}
             onClose={close}
             isDaylight={isDaylight}
+            size="l"
             title={t('ui.equalizerTitle')}
-            description={t('ui.equalizerDescription')}
-            maxWidthClass="max-w-2xl"
+            subtitle={t('ui.equalizerDescription')}
+            headerActions={(
+                // The switch takes its name from the label it sits in. A narrow window has no room for the words: they stay for a screen reader.
+                <label className="flex cursor-pointer items-center gap-3">
+                    <span className="whitespace-nowrap text-xs text-[color:var(--st-t2)] max-sm:sr-only">
+                        {t(draft.enabled ? 'ui.equalizerEnabled' : 'ui.equalizerDisabled')}
+                    </span>
+                    <Toggle checked={draft.enabled} onChange={setEnabled} />
+                </label>
+            )}
         >
-            <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-                <button
-                    type="button"
-                    onClick={() => {
-                        const next = { ...draftRef.current, enabled: !draftRef.current.enabled };
-                        updateDraft(next);
-                        commitSettings(next);
-                    }}
-                    aria-pressed={draft.enabled}
-                    className={`flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold transition-colors ${buttonClass}`}
-                    style={draft.enabled ? {
-                        color: selectedAccentColor,
-                        borderColor: colorWithAlpha(selectedAccentColor, 0.5),
-                        backgroundColor: colorWithAlpha(selectedAccentColor, 0.1),
-                    } : undefined}
-                >
-                    <Power size={14} />
-                    {t(draft.enabled ? 'ui.equalizerEnabled' : 'ui.equalizerDisabled')}
-                </button>
-
-                <div className="flex flex-wrap items-center gap-1.5">
-                    {PRESET_IDS.map(presetId => (
-                        <button
-                            key={presetId}
-                            type="button"
-                            onClick={() => applyPreset(presetId)}
-                            aria-pressed={draft.preset === presetId}
-                            className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold transition-colors ${buttonClass}`}
-                            style={draft.preset === presetId ? {
-                                color: selectedAccentColor,
-                                borderColor: colorWithAlpha(selectedAccentColor, 0.55),
-                                backgroundColor: colorWithAlpha(selectedAccentColor, 0.12),
-                            } : undefined}
-                        >
-                            {t(`ui.equalizerPreset.${presetId}`)}
-                        </button>
-                    ))}
-                    <button
-                        type="button"
-                        onClick={() => applyPreset('flat')}
-                        title={t('ui.equalizerReset')}
-                        aria-label={t('ui.equalizerReset')}
-                        className={`rounded-full border p-2 transition-colors ${buttonClass}`}
-                    >
-                        <RotateCcw size={14} />
-                    </button>
+            {/* 这一层排窗口里的内容（至少和窗口一样高，多出的高度给推子），也让这扇对话框自己能被思索命中。 */}
+            <div data-ponder="audio-equalizer" className="flex min-h-full flex-col">
+                <PresetChips
+                    presetIds={PRESET_IDS}
+                    chosen={draft.preset}
+                    onChoose={applyPreset}
+                    canReset={isAudioEqualizerCustomSlotId(draft.preset)}
+                    onReset={resetActiveCustomSlot}
+                />
+                {/* Dimmed while processing is off, and still in reach: an edit turns processing on. */}
+                <div className={`st-t-move flex flex-1 flex-col transition-opacity${draft.enabled ? '' : ' opacity-40'}`}>
+                    <EqualizerBandGrid gains={draft.gains} onBandChange={updateBandDraft} onCommit={commitDraft} />
+                    <AudioEffectGrid effects={draft.effects} onEffectChange={updateEffectDraft} onCommit={commitDraft} />
                 </div>
             </div>
-
-            <div className={`overflow-x-auto rounded-2xl border p-4 ${surfaceClass}`}>
-                <div className="mb-3 flex min-w-[520px] items-center justify-between text-[10px] font-semibold uppercase tracking-[0.18em]">
-                    <span className={`flex items-center gap-1.5 ${inactiveText}`}><AudioLines size={13} />{t('ui.equalizerGain')}</span>
-                    <span className={inactiveText}>+12 dB · 0 · −12 dB</span>
-                </div>
-                <div className="grid min-w-[520px] grid-cols-10 gap-2">
-                    {AUDIO_EQUALIZER_BANDS.map((band, index) => {
-                        const gain = draft.gains[index] ?? 0;
-                        return (
-                            <label key={band.frequency} className="flex flex-col items-center gap-2">
-                                <span className={`text-[10px] font-semibold tabular-nums ${gainTextClass}`} style={{ color: gain === 0 ? undefined : selectedAccentColor }}>
-                                    {gain > 0 ? '+' : ''}{gain}
-                                </span>
-                                <input
-                                    type="range"
-                                    min={AUDIO_EQUALIZER_MIN_GAIN_DB}
-                                    max={AUDIO_EQUALIZER_MAX_GAIN_DB}
-                                    step="1"
-                                    value={gain}
-                                    aria-label={`${band.label} Hz`}
-                                    onInput={event => updateBandDraft(index, Number(event.currentTarget.value))}
-                                    onChange={event => updateBandDraft(index, Number(event.currentTarget.value))}
-                                    onPointerUp={() => commitSettings(draftRef.current)}
-                                    onPointerCancel={() => commitSettings(draftRef.current)}
-                                    onKeyUp={() => commitSettings(draftRef.current)}
-                                    onBlur={() => commitSettings(draftRef.current)}
-                                    className={`h-32 w-1.5 cursor-pointer appearance-none rounded-full ${trackClass}`}
-                                    style={{ writingMode: 'vertical-lr', direction: 'rtl', accentColor: isDaylight ? selectedAccentColor : theme.accentColor }}
-                                />
-                                <span className={`text-[10px] font-semibold tabular-nums ${inactiveText}`}>{band.label}</span>
-                            </label>
-                        );
-                    })}
-                </div>
-                <div className={`mt-2 min-w-[520px] text-center text-[9px] uppercase tracking-[0.2em] ${inactiveText}`}>Hz</div>
-            </div>
-        </ThemedDialog>
-    ), document.body);
+        </Sheet>
+    );
 };
 
 export default AudioEqualizerDialog;

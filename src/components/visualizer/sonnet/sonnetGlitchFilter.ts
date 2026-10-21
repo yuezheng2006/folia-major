@@ -1,25 +1,9 @@
 import type { Filter } from 'pixi.js';
+import { PIXI_FILTER_VERTEX as vertex } from '../pixiFilterVertex';
 
 // src/components/visualizer/sonnet/sonnetGlitchFilter.ts
 // Creates a monochrome-safe horizontal slice/tear filter for brief glitch-art transitions.
 type PixiModule = typeof import('pixi.js');
-
-const vertex = `
-in vec2 aPosition;
-out vec2 vTextureCoord;
-
-uniform vec4 uInputSize;
-uniform vec4 uOutputFrame;
-uniform vec4 uOutputTexture;
-
-void main(void) {
-    vec2 position = aPosition * uOutputFrame.zw + uOutputFrame.xy;
-    position.x = position.x * (2.0 / uOutputTexture.x) - 1.0;
-    position.y = position.y * (2.0 * uOutputTexture.z / uOutputTexture.y) - uOutputTexture.z;
-    gl_Position = vec4(position, 0.0, 1.0);
-    vTextureCoord = aPosition * (uOutputFrame.zw * uInputSize.zw);
-}
-`;
 
 const fragment = `
 in vec2 vTextureCoord;
@@ -68,7 +52,12 @@ export const createSonnetGlitchEffect = (pixi: PixiModule): SonnetGlitchEffect =
     const filter = new pixi.Filter({
         glProgram: pixi.GlProgram.from({ vertex, fragment, name: 'sonnet-mono-glitch' }),
         resources: { glitchUniforms: uniforms },
-        padding: 40,
+        // padding must stay 0: Pixi sums the padding of every enabled filter in the chain and
+        // grows the shared render frame *after* clipping it to the viewport, so padding here only
+        // ever adds off-screen pixels — while shifting the frame that the scene's vignette pass
+        // derives its screen coordinates from, which made the vignette pop outward on every glitch
+        // transition. The tear samples with uInputClamp, so it never needs the extra margin.
+        padding: 0,
     });
     filter.enabled = false;
     return {

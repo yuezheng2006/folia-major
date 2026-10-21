@@ -5,6 +5,7 @@ import { getNavidromeConfig, navidromeApi } from '../services/navidromeService';
 import { resolveNavidromePlaybackCarrier } from '../utils/appPlaybackGuards';
 import { NavidromeScrobbleSessionTracker } from '../utils/navidromeScrobble';
 import { getProviderSongMetadata } from '../services/onlineMusic/songMetadata';
+import { errorFields } from '../utils/errorText';
 
 // src/hooks/useNavidromeScrobbleReporter.ts
 // Bridges audio playback events to Navidrome scrobble/now-playing reports.
@@ -12,11 +13,14 @@ import { getProviderSongMetadata } from '../services/onlineMusic/songMetadata';
 type UseNavidromeScrobbleReporterParams = {
     audioRef: RefObject<HTMLAudioElement | null>;
     currentSong: SongResult | null;
+    /** Changes when automix hands playback to the other deck, so the listeners follow it. */
+    activeDeck: string;
 };
 
 export const useNavidromeScrobbleReporter = ({
     audioRef,
     currentSong,
+    activeDeck,
 }: UseNavidromeScrobbleReporterParams): void => {
     const currentSongRef = useRef<SongResult | null>(currentSong);
     const trackerRef = useRef<NavidromeScrobbleSessionTracker | null>(null);
@@ -38,7 +42,7 @@ export const useNavidromeScrobbleReporter = ({
                     console.warn('[Navidrome] scrobble report was rejected', { kind, songId });
                 }
             }).catch((error) => {
-                console.warn('[Navidrome] scrobble report failed', { kind, songId, error });
+                console.warn('[Navidrome] scrobble report failed', { kind, songId, ...errorFields(error) });
             });
         });
     }
@@ -116,5 +120,15 @@ export const useNavidromeScrobbleReporter = ({
             audioElement.removeEventListener('timeupdate', handleProgress);
             audioElement.removeEventListener('ended', handleEnded);
         };
-    }, [audioRef]);
+        // audioRef names a different element after an automix deck swap, and these listeners are
+        // bound to the element itself rather than read through the ref, so they have to rebind.
+        //
+        // Known limitation: the swap happens at ARM time, up to AUTOMIX_ARM_LEAD_SEC before the
+        // outgoing track actually ends, so this rebinds off it early. Its last few seconds of
+        // `timeupdate` go unheard and its `ended` never fires here - the incoming track's
+        // `startSession` simply supersedes it. This is only harmless because the submission threshold
+        // (min(60s, duration/2)) is reached well before arm on any normal track, so the scrobble is
+        // already committed by then. If that threshold rule ever changes, this becomes a silent
+        // under-report and needs the exit track driven from the settle path instead of the active deck.
+    }, [audioRef, activeDeck]);
 };

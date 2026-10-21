@@ -35,15 +35,35 @@ yay -S folia-major-bin
 
 `tar.gz` 包中附带图标与 `.desktop` 模板，可按需手动创建桌面启动项。
 
+### Quickshell 歌词插件
+
+对于 omarchy 4 / quickshell 用户，我们提供一个简单的顶部歌词插件：[lia.lines](https://github.com/chthollyphile/lia.lines)
+
+omarchy 用户可从下列官方插件市场链接获取：
+
+https://omarchyplugins.com/plugin.html?id=lia.folia-lyrics
+
+可连接 folia-v1-lyric 接口，在顶部状态栏查看歌词，以及进行暂停/播放操作。该插件在folia没有播放的时候也支持作为简易MPRIS组件，显示媒体信息
+
+<img width="2560" height="51" alt="image" src="https://github.com/user-attachments/assets/87cb8db0-ef00-4382-9eb3-fa7696e4f6ff" />
+
+
+
 ### Hyprland / Wayland 遥控窗
 
-桌面端的外部遥控窗会作为主窗口的伴随窗口打开，并使用稳定窗口标题 `Folia Remote`。在 Hyprland 下，如果希望它以悬浮小窗方式出现，可以在 `hyprland.conf` 中添加类似规则：
+桌面端的外部遥控窗会作为主窗口的伴随窗口打开，并使用稳定窗口标题 `Folia Remote`。
+
+纯 Wayland 下 Folia 没法自己把窗口置顶：Chromium 的 Wayland 后端收到置顶请求后只记下这个值，不发给合成器（标准 xdg-shell 也没有"置顶"这个请求）。所以这时遥控窗右上角的图钉、遥控窗"更多"里主窗口的"置顶"、托盘菜单的"窗口置顶"都是灰的，命令面板里也没有"切换主窗口置顶"。要置顶，交给合成器的窗口规则，做法见下面 Hyprland 和 KDE 两节；也可以改用 XWayland 运行（见 KDE 一节最后），那样这几个开关照常可用。
+
+#### Hyprland
+
+如果希望遥控窗以悬浮小窗方式出现并保持置顶，可以在 `hyprland.conf` 中添加类似规则：
 
 ```ini
 windowrule {
   name = folia-remote
   float = on
-  size = 520 315
+  size = 602 184
   center = on
   pin = on
   no_blur = on
@@ -57,6 +77,22 @@ windowrule {
 
 不同打包方式下窗口 `class` 可能不同；如果规则没有生效，可以用 `hyprctl clients` 查看实际 `class` / `title` 后再调整匹配条件。
 
+#### KDE Plasma（KWin）
+
+长期生效的做法是加一条 KWin 窗口规则（括号里是英文界面的名字，中文翻译随版本可能略有不同）：
+
+1. 打开"系统设置"里的"窗口规则"（Window Rules），新建一条规则。
+2. "窗口类（应用程序）"（Window class (application)）填 `folia-major`，"窗口标题"（Window title）填 `Folia Remote`，都选"完全匹配"（Exact Match）。也可以在遥控窗开着时点"检测窗口属性"（Detect Window Properties），再点一下遥控窗，自动填入。
+3. 点"添加属性"（Add Property），选"保持在其他窗口之上"（Keep above other windows），设为"强制"（Force）和"是"（Yes），然后应用。
+
+主窗口（例如桌面歌词）也想置顶的话，把"窗口标题"那一项去掉、只按窗口类匹配：这条规则会同时作用于主窗口和遥控窗。
+
+只想临时置顶一次：选中窗口后按 `Alt+F3` 打开窗口菜单，在"更多操作"（More Actions）里勾选"保持在其他窗口之上"（Keep Above Others）。遥控窗没有系统标题栏，所以用快捷键打开这个菜单；关掉窗口后这个设置不会保留。
+
+和 Hyprland 一样，不同打包方式下窗口类可能不同，以"检测窗口属性"看到的为准。
+
+也可以让 Folia 走 XWayland：启动时加上 `--ozone-platform=x11`（例如 `folia-major --ozone-platform=x11`，或者写进 `.desktop` 文件的 `Exec` 行）。这时置顶由 Folia 自己完成，上面几个开关照常可用；代价是窗口改走 X11 兼容层，缩放、输入法等方面的表现可能与原生 Wayland 不同，壁纸模式在这种运行方式下也不保证可用。
+
 ## 部署与开发
 
 ### 后端 API
@@ -65,7 +101,7 @@ windowrule {
 
 如果使用前端版本的话，需要先自行部署该 API 服务。
 
-QQ 音乐是可选音源，由 npm 包 `@yakult-green-tea/qq-music-api` 提供。它需要一个常驻的 Node 进程（Docker 容器、裸 Node，或 Electron 主进程内嵌），因为原生扫码依赖 MQTT over WebSocket 长连线与进程内会话，暂不支持 Cloudflare Workers 与 Vercel Serverless。部署方式、环境变量、装置状态与 serverless 的完整说明见 [`deploy/docker/qq-api/README.md`](../deploy/docker/qq-api/README.md)。Web 版把 `VITE_QQ_API_BASE` 指向实例地址即可；Electron 版在主进程内直接启动该包，不需要单独部署。
+QQ 音乐是可选音源，由 npm 包 `@yakult-green-tea/qq-music-api` 提供，有两种部署形态。一是常驻 Node 进程（Docker 容器、裸 Node，或 Electron 主进程内嵌），功能最完整，支持手机 QQ 扫码、微信扫码和 QQ 音乐 App 扫码；后端 3.3.2 起 Folia 只显示一张 QQ 音乐 App 扫码的二维码，手机 QQ、微信、QQ 音乐 App 都能扫。二是 serverless：从 3.0.0 起该包提供 `./serverless` 导出，本仓库已内置 Cloudflare Workers 与 Vercel 两个平台的入口，把 `VITE_QQ_API_BASE` 填成 `/api/qq` 并配好 `QQ_SESSION_SECRET` 即可，不需要单独部署 API 实例。serverless 形态默认支持微信扫码，3.3.3 起也支持手机 QQ 扫码（走 QQ 互联的网页登录，不用长连接），且 `/getMusicPlay` 必须先登录；Cloudflare 可选地绑定 Durable Object（`QQ_QR_CHANNEL` → `QqQrChannel`），手机 QQ 扫码改走长连接，3.3.2 起还多一个 QQ 音乐 App 扫码。完整部署步骤与排错方法见 [QQ 音乐部署指南](qq-music-deployment.md)；Docker 镜像、卷和常驻服务细节见 [`deploy/docker/qq-api/README.md`](../deploy/docker/qq-api/README.md)。Electron 版在主进程内直接启动该包，不需要单独部署。Folia 锁定 3.3.3：电台页的每日推荐、私人 FM（猜你喜欢）与推荐歌单，往自建歌单加歌删歌和收藏歌单，是 3.3.0 新增的接口；红心与收藏专辑是 3.3.1 新增的；3.3.2、3.3.3 新增的接口（音乐云盘、QQ 音乐 App 扫码、续期、排行榜、新碟、刷歌模式等）见 [`deploy/docker/qq-api/README.md`](../deploy/docker/qq-api/README.md)。不喜欢与历史日推后端还没有，QQ 不提供这两项。
 
 ### AI 能力
 
@@ -90,7 +126,7 @@ Electron 桌面端可在“连接与集成”中启用歌词接口。启用后�
 GET http://127.0.0.1:32109/v1/lyric
 ```
 
-接口返回当前歌词的精简 JSON；当前没有歌词时返回 `null`。请求、响应结构、字段说明和调用示例见 [歌词接口文档](lyric-api.md)。
+接口返回当前歌词的精简 JSON，并在顶层 `offset` 字段中携带用户设置的歌词时间偏移（毫秒）；当前没有歌词时返回 `null`。请求、响应结构、字段说明和调用示例见 [歌词接口文档](lyric-api.md)。
 
 ### 一键部署到 Vercel
 
@@ -132,12 +168,14 @@ vercel env pull .env.local
 | --- | --- | --- |
 | `VITE_NETEASE_API_BASE` | 网易云音乐 API 实例地址 | 是 |
 | `VITE_KUGOU_API_BASE` | Web 版的 KuGouMusicApi 实例地址；Electron 不使用此项 | 否，默认留空 |
-| `VITE_QQ_API_BASE` | QQ 音乐 API 实例地址；留空时 QQ 入口可见但不可用 | 否，默认留空 |
+| `VITE_QQ_API_BASE` | QQ 音乐 API 实例地址；Cloudflare / Vercel 上可填 `/api/qq` 用本仓库内置的 serverless 入口；留空时 QQ 入口可见但不可用 | 否，默认留空 |
+| `QQ_SESSION_SECRET` | serverless 形态下加密登录态用的服务端密钥，**不加 `VITE_` 前缀**；未设置时 QQ 登录路由回 501，曲库路由仍可用 | 用 `/api/qq` 时需要 |
+| `QQ_SESSION_SECRET_PREVIOUS` | 轮换 `QQ_SESSION_SECRET` 时用来验证旧令牌，避免把所有人一次性登出 | 否 |
 | `VITE_AI_PROVIDER` | AI 提供商，`google` 或 `openai` | 是 |
 | `GEMINI_API_KEY` | Gemini API Key | 使用 Gemini 时需要 |
 | `OPENAI_API_KEY` | OpenAI 兼容 API Key | 使用 OpenAI兼容接口 时需要 |
 | `OPENAI_API_URL` | OpenAI 兼容接口地址，可填 base URL 或完整 `chat/completions` 地址 | 使用 OpenAI兼容接口 时需要 |
-| `OPENAI_API_MODEL` | 模型名，例如 `gpt-4o`、`gpt-4.1-mini`、`deepseek-v4-flash` | 使用 OpenAI兼容接口 时需要 |
+| `OPENAI_API_MODEL` | 模型名，例如 `gpt-5.6-luna`、`gpt-4.1-mini`、`deepseek-v4-flash` | 使用 OpenAI兼容接口 时需要 |
 | `OPENAI_API_TEMPERATURE` | 温度，范围 `0`–`2`；留空或无效时默认使用 `0.7` | 否 |
 
 注意：部分模型对于温度参数有特殊要求，例如 `kimi-k3` 要求温度必须为 `1`。
@@ -196,7 +234,7 @@ VITE_NETEASE_API_BASE=http://localhost:3000
 VITE_AI_PROVIDER=openai
 OPENAI_API_KEY=your_api_key
 OPENAI_API_URL=https://api.openai.com/v1
-OPENAI_API_MODEL=gpt-4o
+OPENAI_API_MODEL=gpt-5.6-luna
 OPENAI_API_TEMPERATURE=0.7
 ```
 
@@ -214,9 +252,17 @@ vercel dev
 | `npm run build` | 构建 Web 版本 |
 | `npm run preview` | 预览构建结果 |
 | `npm run dev:electron` | 启动 Electron 开发模式 |
+| `npm run dev:electron:update-preview` | 启动 Electron 开发模式，并模拟显示版本更新提示 |
+| `npm run dev:electron:wallpaper` | 先构建 `windowtolayer`，再启动 Electron 开发模式（Linux 壁纸模式联调） |
 | `npm run dev:electron:dist` | 构建后以桌面模式运行 |
 | `npm run build:electron` | 打包桌面端应用 |
+| `npm run build:windowtolayer` | 单独构建 Linux 壁纸模式依赖的 `build/windowtolayer` |
+| `npm run build:wallpaper-helper` | 单独构建 Windows 壁纸模式依赖的 `build/folia-wallpaper-helper.exe`（非 Windows 主机为 no-op） |
 | `npm run stage:client` | 打开本地 Stage API 联调台 |
+
+所有 `dev:electron*` 脚本都会注入 `FOLIA_WINDOWTOLAYER_PATH=build/windowtolayer`，让开发运行也能找到壁纸模式所需的
+`windowtolayer`（打包运行时用的是 `resources/windowtolayer`）。该二进制不随仓库分发，首次联调壁纸模式前先跑一次
+`npm run build:windowtolayer`（或直接用 `npm run dev:electron:wallpaper`）；二进制缺失时壁纸模式开关会自动回退关闭。
 
 ## 代码速查地图
 
@@ -225,11 +271,12 @@ vercel dev
 | App 顶层装配、overlay、dialog、播放器面板参数组装 | `src/components/app/*` |
 | 设置中心 UI | `src/components/modal/settings/*` |
 | 设置持久化、visualizer tuning、偏好 store | `src/stores/useSettingsUiStore.ts` |
-| 命令面板命令 | `src/components/command-palette/commandRegistry.ts` |
+| 命令面板命令 | `src/components/command-palette/commands/<group>Commands.ts`（`commandRegistry.ts` 只做拼接与过滤） |
 | visualizer 共享契约和注册 | `src/components/visualizer/definition.ts`、`src/components/visualizer/registry.tsx` |
-| visualizer 预览和设置面板 | `src/components/visualizer/VisPlayground.tsx`、`src/components/visualizer/VisPlaygroundSettingsPanel.tsx` |
+| visualizer 预览和设置面板 | `src/components/visualizer/window/VisPlayground.tsx`、`src/components/visualizer/window/VisPlaygroundSettingsPanel.tsx` |
 | visualizer 模式实现 | `src/components/visualizer/<mode>/*` |
 | 歌词解析和渲染提示 | `src/utils/lyrics/*` |
+| 智能过渡（混音过渡开关背后的全部实现） | `src/services/automix/*`，先读该目录的 `README.md` |
 | 本地音乐、Navidrome、网易云服务 | `src/services/*` |
 | 共享类型和默认 tuning | `src/types.ts` |
 

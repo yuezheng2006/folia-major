@@ -1,4 +1,5 @@
 import type React from 'react';
+import type { MotionValue } from 'framer-motion';
 import type SettingsModal from '../../modal/SettingsModal';
 import type {
     DualTheme,
@@ -9,28 +10,35 @@ import type {
     StageStatus,
 } from '../../../types';
 import type { useThemeController } from '../../../hooks/useThemeController';
-import { type SettingsModalState, useSettingsUiStore } from '../../../stores/useSettingsUiStore';
+import type { SettingsModalState } from '../../../stores/useSettingsModalStore';
 import type { ObsBrowserSourceStatus } from '../../../types/obsBrowserSource';
 import type { PlayerCapConnectionStatus } from '../../../types/playerCap';
 import type { LyricApiStatus } from '../../../types/lyricApi';
+import { closeSettings } from '../../../stores/useSettingsModalStore';
 
 // src/components/app/dialogs/buildSettingsDialogModel.ts
 
 type SettingsDialogProps = React.ComponentProps<typeof SettingsModal>;
 type ThemeController = ReturnType<typeof useThemeController>;
 
-type BuildSettingsDialogModelParams = {
+// What this file can read for itself, so the caller never names it. See useSettingsDialogModel.
+type SettingsDialogAmbient = {
     state: SettingsModalState;
-    onClose: () => void;
+    currentSongTitle?: string | null;
+    currentLyrics: LyricData | null;
+    lyricCurrentTime: MotionValue<number>;
+    activePlaybackContext: 'main' | 'stage';
+    replayGainMode: ReplayGainMode;
+};
+
+export type SettingsDialogDeps = {
     themeController: ThemeController;
     themeParkInitialTheme: DualTheme;
     onToggleNavidrome?: (enabled: boolean) => void;
-    currentSongTitle?: string | null;
     loadLyricFilterPreview: () => Promise<LyricData | null>;
-    onSaveLyricFilterPattern: (pattern: string) => Promise<void> | void;
+    onSaveLyricFilterPattern: SettingsDialogProps['onSaveLyricFilterPattern'];
     stageStatus?: StageStatus | null;
     stageSource?: StageSource | null;
-    activePlaybackContext: 'main' | 'stage';
     setStageStatus: React.Dispatch<React.SetStateAction<any>>;
     leaveStagePlayback: () => void;
     clearStagePlaybackSession: () => void;
@@ -40,7 +48,6 @@ type BuildSettingsDialogModelParams = {
     playerCapConnectionStatus?: PlayerCapConnectionStatus;
     playerCapPlayers?: string[];
     onAudioOutputDeviceChange: (deviceId: string) => Promise<boolean> | boolean;
-    replayGainMode: ReplayGainMode;
     onReplayGainModeChange: (mode: ReplayGainMode) => void;
     onToggleTransparentPlayerBackground: (enabled: boolean) => Promise<void> | void;
     obsBrowserSourceStatus?: ObsBrowserSourceStatus | null;
@@ -49,16 +56,19 @@ type BuildSettingsDialogModelParams = {
     setLyricApiEnabled?: (enabled: boolean) => Promise<LyricApiStatus>;
 };
 
+type BuildSettingsDialogModelParams = SettingsDialogAmbient & SettingsDialogDeps;
+
 // Builds the global settings dialog props without tying the modal to Home.
 export const buildSettingsDialogModel = ({
     state,
-    onClose,
     themeController,
     themeParkInitialTheme,
     onToggleNavidrome,
     currentSongTitle,
     loadLyricFilterPreview,
     onSaveLyricFilterPattern,
+    currentLyrics,
+    lyricCurrentTime,
     stageStatus,
     stageSource,
     activePlaybackContext,
@@ -93,14 +103,19 @@ export const buildSettingsDialogModel = ({
         songThemeAutoSwitchEnabled: themeController.songThemeAutoSwitchEnabled,
         songThemeAutoGenerateEnabled: themeController.songThemeAutoGenerateEnabled,
         onSaveCustomTheme: themeController.saveCustomDualTheme,
+        onSaveAiTheme: themeController.saveEditedAiDualTheme,
         onApplyCustomTheme: themeController.applyCustomTheme,
         onToggleCustomThemePreferred: themeController.handleCustomThemePreferenceChange,
         onToggleSongThemeAutoSwitch: themeController.handleSongThemeAutoSwitchChange,
         onToggleSongThemeAutoGenerate: themeController.handleSongThemeAutoGenerateChange,
+        themeGenerationSource: themeController.themeGenerationSource,
+        onChangeThemeGenerationSource: themeController.handleThemeGenerationSourceChange,
         onToggleNavidrome,
         currentSongTitle,
         loadLyricFilterPreview,
         onSaveLyricFilterPattern,
+        currentLyrics,
+        lyricCurrentTime,
         stageStatus,
         stageSource,
         nowPlayingConnectionStatus,
@@ -132,7 +147,8 @@ export const buildSettingsDialogModel = ({
         initialTab: state.initialTab,
         initialSubview: state.initialSubview ?? null,
         initialVisualizerSection: state.initialVisualizerSection ?? null,
-        onClose,
+        initialAnchor: state.initialAnchor ?? null,
+        onClose: closeSettings,
         onToggleStageMode: async (enabled) => {
             try {
                 const nextStatus = await window.electron?.setStageEnabled(enabled);
@@ -160,21 +176,6 @@ export const buildSettingsDialogModel = ({
                 if (activePlaybackContext === 'stage') {
                     await loadStageSessionIntoPlayback(null);
                 }
-            }
-        },
-        onClearStageState: async () => {
-            const nextStatus = await window.electron?.clearStageState();
-            if (nextStatus) {
-                setStageStatus(nextStatus);
-                if (activePlaybackContext === 'stage') {
-                    await loadStageSessionIntoPlayback(null);
-                }
-            }
-        },
-        onToggleNowPlayingStage: async (enabled) => {
-            useSettingsUiStore.getState().handleToggleNowPlayingStage(enabled);
-            if (!enabled && activePlaybackContext === 'stage') {
-                leaveStagePlayback();
             }
         },
         aiTheme: themeController.aiTheme,

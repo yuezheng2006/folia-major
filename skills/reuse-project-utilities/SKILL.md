@@ -22,15 +22,15 @@ description: Use when implementing, refactoring, or reviewing code in this repos
 
 - 歌词解析、时序、render end：`src/utils/lyrics/*`
 - visualizer 运行时、背景、颜色：`src/components/visualizer/*`
-- 设置 UI、导入导出、命令面板：`src/components/modal/settings/*`、`src/stores/useSettingsUiStore.ts`、`src/components/command-palette/*`
-- 同步配置、主题同步和本地导出：`src/services/sync/*`、`src/components/modal/settings/StorageSettingsSection.tsx`
+- 设置 UI、导入导出、命令面板：`src/components/modal/settings/*`、`src/stores/useSettingsModalStore.ts`（弹窗 UI 状态）、按领域拆分的 `src/stores/use*SettingsStore.ts`（设置值）、`src/components/command-palette/*`
+- 同步配置、主题同步和本地导出：`src/services/sync/*`、`src/components/modal/settings/pages/integration/SyncServerRows.tsx`（同步服务）、`src/components/modal/settings/pages/storage/ConfigTransferRows.tsx`（本地导出）
 - 字体栈和自定义字体：`src/utils/fontStacks.ts`、`src/services/customLyricsFont.ts`
 - 播放队列、播放适配：`src/services/playbackAdapters.ts`、`src/utils/appPlaybackHelpers.ts`
 - 播放身份与去重：`src/utils/appPlaybackGuards.ts`、`src/utils/appPlaybackHelpers.ts`
 - 在线歌曲统一入口：`src/services/onlineMusic/omni.ts`、`src/types/onlineMusic.ts`
 - 本地库索引与命名：`src/utils/localLibraryIndex.ts`、`localLibraryNames.ts`、`localLibraryResolver.ts`
 - Stage / OBS / PlayerCap 数据转换：`src/utils/appStageHelpers.ts`、`src/utils/stageClientDemo.ts`、`src/utils/stagePlayerSnapshot.ts`、`src/utils/obs*.ts`、`src/utils/playerCap*.ts`
-- 网易云 / Navidrome / 本地音乐 API：`src/services/netease.ts`、`navidromeService.ts`、`localMusicService.ts`
+- 网易云 / Navidrome / 本地音乐 API：`src/services/onlineMusic/netease/netease.ts`、`navidromeService.ts`、`localMusicService.ts`
 - 主题、封面、取色、缓存：`src/hooks/themeControllerState.ts`、`src/utils/colorExtractor.ts`、`src/services/themeCache.ts`、`src/services/coverCache.ts`
 - UI 图标、动画、弹窗、选择器：`lucide-react`、`framer-motion`、`components/shared/*`
 
@@ -65,6 +65,47 @@ const width = layout.lines[0]?.width ?? fallbackWidth;
 - 需要和 CJK / grapheme 排版更接近真实浏览器表现的场景
 
 不要手写 `text.length * fontSize` 作为主测量逻辑；只能作为 fallback。
+
+#### 测量必须和真实渲染结构一致
+
+`prepareWithSegments(fullText, fontSpec)` 把整行当成一个可任意断开的字符串。只有当 DOM 里这行文本
+也是一个普通的 inline 文本流时，这个假设才成立。
+
+如果渲染时把每个词/token 包成了 `display: inline-block`（逐字扫光、per-word 上色、chip、mention 都会这么做），
+那它就是**原子行内盒，内部不允许断行**，浏览器只能在 token 之间断。中日文尤其明显：词间没有空格，
+pretext 会在任意字之间断，浏览器只能在 token 边界断，实测行数可以差 1~2 行。行数算少了，
+预留高度就不够，多出来的行会从 padding 里漏出去压到下一个区块（Monet 歌词压到翻译行就是这么来的）。
+
+这种情况用 rich-inline helper，把原子 token 标成 `break: 'never'`：
+
+```ts
+import { measureRichInlineStats, prepareRichInline, type RichInlineItem } from '@chenglou/pretext/rich-inline';
+
+const items: RichInlineItem[] = tokens.map(token => ({
+    text: token.text,
+    font: fontSpec,
+    break: token.timed ? 'never' : 'normal',   // 'never' == inline-block 原子盒
+}));
+const { lineCount } = measureRichInlineStats(prepareRichInline(items), maxWidthPx);
+```
+
+实测（Chromium，对照真实 DOM 行数）：token 都放得进列宽时，`break: 'never'` 154 组用例**零误差**，
+而按整串测量错 14 组。参考实现见 `measureLyricLineStats`（`src/components/visualizer/monet/monetLyricsModel.ts`）。
+
+其它容易踩的对齐点：
+
+- **`whiteSpace`**：`prepare()` / `prepareWithSegments()` 默认按 `white-space: normal` 处理。DOM 上写了
+  `whitespace-pre-wrap` 就必须传 `{ whiteSpace: 'pre-wrap' }`，否则连续空格被折叠，行数算少。
+- **`letterSpacing` / `wordBreak`**：CSS 上有 `letter-spacing`、`word-break: keep-all` 时，同样要作为 options 传进去。
+- **零宽字符不是断行控制手段**：U+2060 WORD JOINER、U+FEFF 都不会阻止 pretext 断行（宽度为 0，断点照旧），
+  别指望靠插入零宽字符来表达"不可断"。要原子性就用 rich-inline 的 `break: 'never'`。
+- **超宽 token 仍不精确**：token 自然宽度超过列宽时，Blink 对 `inline-block` 的 shrink-to-fit 行为
+  （`overflow-wrap: break-word` 不参与 min-content 计算，结果是溢出而不是内部换行）rich-inline 没有建模，
+  实测仍有偏差。这种极端情形不要依赖测量值兜底，改用内容自撑高度。
+- **`system-ui` 在 macOS 上不可靠**：pretext README 明确说明 `layout()` 精度对 `system-ui` 不保证，字体栈里
+  优先落到具名字体。
+- **单测要 mock 子路径**：`vi.mock('@chenglou/pretext')` 不会覆盖 `@chenglou/pretext/rich-inline`，
+  两个都要 mock，否则 node 环境下会抛 `Text measurement requires OffscreenCanvas or a DOM canvas context.`。
 
 ### Visualizer Runtime
 
@@ -106,6 +147,22 @@ CJK 语义分组、sticky 标点、英文 contraction 已有布局工具：
 位置：`src/utils/lyrics/cjkSemanticLayout.ts`
 
 新增按词/按块 visualizer 时，优先使用 layout units。不要在组件里临时拼接标点、撇号、CJK 字符。
+
+### Word Segmentation
+
+歌词按词分词只有一个入口：`src/utils/lyrics/wordSegmentation.ts`
+
+- `segmentLyricWords(line)` —— 有用户保存的精细分词就用它，否则 `Intl.Segmenter`
+- `segmentTextWords(text)` —— 没有 `Line` 时的无覆盖版本
+- `segmentsFromBoundaries(boundaries)`、`isValidWordSegmentation(text, boundaries)`
+
+**不要再写 `new Intl.Segmenter(..., { granularity: 'word' })`。** 这里原本有三份各自为政的实现
+（`cjkSemanticLayout`、`sonnetSemantic`、`temperaProgram`，后两份逐字重复），用户的精细分词
+（命令 `lyric-segmentation`）就没法一次覆盖到所有模式。`granularity: 'grapheme'` 是另一回事，
+走 `graphemeTiming.ts`，与这里无关。
+
+新增按词排版的 visualizer 时，在它的 `entry.tsx` 上标 `usesWordSegmentation: true`，
+面板快捷按钮和命令的可用性都从注册表读这个字段。
 
 ### Grapheme Timing
 
@@ -163,6 +220,22 @@ visualizer 颜色混合和 alpha 已有 helper：
 
 新增动画先看相邻组件模式。涉及高频运行时，再结合 `frontend-runtime-guardrails`。
 
+### Dialogs
+
+弹窗的外框只有一个：`src/components/shared/Sheet.tsx`（标题和关闭在上、内容在中、底部左侧说明右侧按钮，三种尺寸）。Esc 只关最上面一层、焦点进出、明暗主题和动效都在外框里，新弹窗不要自己写遮罩和键盘监听。
+
+- 一句话加两个按钮的确认：`ConfirmDialog`；会删除或覆盖东西的传 `confirmVariant="danger"`。
+- 在异步流程中间要问一句：`useConfirmDialog`（`await ask(...)` 得到 true / false）。
+- 带标题、说明和自己内容的弹窗：`ThemedDialog`，底部按钮用 `SheetButton`。
+- 不要用浏览器自带的 `confirm()` / `alert()` / `prompt()`；只是告知结果用 `setStatusMessage`。
+
+### Outside Links, Clipboard And Error Text
+
+- 到应用外面打开一个地址：`openOutsideLink`（`src/utils/system/outsideLink.ts`）。桌面端交给系统浏览器，网页版开新标签页；不要自己写 `window.electron?.openExternalUrl` 或 `window.open`。打不开时要说点什么，就等它或者接住它。
+- 把文字放上剪贴板：`copyText`（`src/utils/system/clipboard.ts`），浏览器不给剪贴板接口时走隐藏输入框；不要直接写 `navigator.clipboard`。成功和失败的提示各处自己管。
+- 抛出的错要拆成字段或者一句话（放进一个对象、一条记录、界面上的一行字）：`errorFields` / `errorMessage`（`src/utils/errorText.ts`），都是原文。打日志能直接交 Error 本身就直接交，会话日志会记下它的调用栈。
+- 「这是不是 Mac / Windows」：`src/utils/platform.ts`。
+
 ### i18n
 
 UI 文案使用 `react-i18next`：
@@ -171,15 +244,15 @@ UI 文案使用 `react-i18next`：
 const { t } = useTranslation();
 ```
 
-任何新增到 UI 上的用户可见文本都必须准备 i18n key，并同步写入 `src/i18n/locales/en.ts` 和 `src/i18n/locales/zh-CN.ts`。不要把按钮、标题、提示、空态、设置项、tooltip、toast 或模式文案只写成硬编码字符串；短 fallback 只能作为现有 registry / 兼容模式的兜底，不能替代字典项。
+任何新增到 UI 上的用户可见文本都必须准备 i18n key，并同步写入 `src/i18n/locales/` 的三份：`en.ts`、`zh-CN.ts` 和 `in.ts`。不要把按钮、标题、提示、空态、设置项、tooltip、toast 或模式文案只写成硬编码字符串；短 fallback 只能作为现有 registry / 兼容模式的兜底，不能替代字典项。
 
 ### Settings And Commands
 
 新增设置时先套用 `settings-feature-integration`：
 
-- 视觉相关设置必须进入 `AppearanceSettingsSubview.tsx` 的导入导出链路。
-- 功能性设置或可执行动作必须注册到 `src/components/command-palette/commandRegistry.ts`。
-- 设置状态优先复用 `src/stores/useSettingsUiStore.ts`，不要在组件里另起一套 localStorage 读写。
+- 视觉相关设置必须进入 `src/components/modal/settings/pages/storage/visualConfigTransfer.ts` 的导入导出链路。
+- 功能性设置或可执行动作必须注册成命令，写在 `src/components/command-palette/commands/<group>Commands.ts`（`commandRegistry.ts` 只负责拼接和过滤）。
+- 设置状态优先复用已有 store：弹窗 UI 状态在 `src/stores/useSettingsModalStore.ts`，设置值在对应领域的 `use*SettingsStore`（`useAudioSettingsStore`、`useLyricSettingsStore`、`useThemeSettingsStore`、`useTypographySettingsStore` 等）。不要在组件里另起一套 localStorage 读写。
 
 ### Long Lists
 
@@ -191,7 +264,7 @@ const { t } = useTranslation();
 
 不要绕过现有 service：
 
-- 网易云 API：`src/services/netease.ts`
+- 网易云 API：`src/services/onlineMusic/netease/netease.ts`（只给网易云的 adapter 用；普通调用走下面的 Omni）
 - Navidrome / Subsonic：`src/services/navidromeService.ts`
 - 本地音乐：`src/services/localMusicService.ts`
 - 在线歌曲搜索、播放、歌词、歌单、账户和 provider 路由：`src/services/onlineMusic/omni.ts`
@@ -201,12 +274,10 @@ const { t } = useTranslation();
 - 队列预取：`src/services/prefetchService.ts`
 - 同步 HTTP / diff / 本地 registry：`src/services/sync/syncClient.ts`、`syncRepository.ts`、`themeSyncRegistry.ts`、`syncCoordinator.ts`
 
-新增数据流时，先判断是 service、hook、util 还是 component：
+新增数据流时，先按功能放（`file-modularization`），在功能目录里再按种类分文件：
 
-- 请求、缓存、接口适配放 service。
-- React 生命周期和用户动作编排放 hook 或 app-level builder。
-- 纯计算、映射、格式化放 util。
-- 展示和交互结构放 component。
+- 请求、缓存、接口适配一个文件，React 生命周期和用户动作编排一个 hook 或 builder，纯计算、映射、格式化一个文件，展示和交互一个组件。
+- 两个以上功能都要用的，才放进共用的 `src/services`、`src/hooks`、`src/utils`。
 - 普通在线歌曲调用必须走 `onlineMusic/omni.ts`；不要在 component/hook/store 中直接调用 provider adapter 或 transport。
 - app-level props、导航和动作组装优先查 `src/components/app/*/build*.ts` / `create*.ts`，不要在 `App.tsx` 重新复制一套映射。
 
@@ -239,6 +310,7 @@ const { t } = useTranslation();
 - 是否新增固定颜色却没有从 `Theme` / `DualTheme` 动态派生并检查明暗两套表现？
 - 是否硬编码歌词或字幕字重，而没有使用 `resolveThemeFontWeight` 和模式 fallback？
 - DOM、Canvas、pretext、光栅化的最终字重以及布局缓存键是否一致？
+- pretext 测量的文本结构是否和实际渲染结构一致？渲染成 `inline-block` token 时要用 rich-inline 的 `break: 'never'`，DOM 上是 `whitespace-pre-wrap` 时要传 `{ whiteSpace: 'pre-wrap' }`。
 - 是否创建了相似 helper，却没有搜索已有实现或测试？
 
 ## Validation

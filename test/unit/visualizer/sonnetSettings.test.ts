@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SONNET_TUNING } from '@/types';
-import { useSettingsUiStore } from '@/stores/useSettingsUiStore';
+import { useVisualizerSettingsStore } from '@/stores/useVisualizerSettingsStore';
 
 // test/unit/visualizer/sonnetSettings.test.ts
-// Verifies Sonnet visibility tuning and the first-entry performance warning at the store boundary.
+// Verifies Sonnet visibility tuning at the store boundary.
 const createLocalStorageMock = (): Storage => {
     const values = new Map<string, string>();
 
@@ -26,13 +26,9 @@ describe('Sonnet settings', () => {
         storage = createLocalStorageMock();
         vi.stubGlobal('localStorage', storage);
         vi.stubGlobal('window', { localStorage: storage });
-        useSettingsUiStore.setState({
+        useVisualizerSettingsStore.setState({
             visualizerMode: 'classic',
             sonnetTuning: { ...DEFAULT_SONNET_TUNING },
-            sonnetPerformanceWarningOpen: false,
-            sonnetPerformanceWarningDontShowAgain: false,
-            sonnetPerformanceWarningDismissed: false,
-            pendingVisualizerMode: null,
         });
     });
 
@@ -42,7 +38,7 @@ describe('Sonnet settings', () => {
 
     it('updates and persists visibility tuning', () => {
         expect(DEFAULT_SONNET_TUNING.textureResolution).toBe(1.5);
-        useSettingsUiStore.getState().handleSetSonnetTuning({
+        useVisualizerSettingsStore.getState().handleSetSonnetTuning({
             showOnlyText: true,
             showGuide: false,
             showBackgroundMg: false,
@@ -53,7 +49,7 @@ describe('Sonnet settings', () => {
             postProcessLensDispersion: 0.7,
         });
 
-        expect(useSettingsUiStore.getState().sonnetTuning).toMatchObject({
+        expect(useVisualizerSettingsStore.getState().sonnetTuning).toMatchObject({
             showOnlyText: true,
             showGuide: false,
             showBackgroundMg: false,
@@ -76,28 +72,16 @@ describe('Sonnet settings', () => {
         });
     });
 
-    it('requires confirmation before entering Sonnet and remembers the opt-out', () => {
-        useSettingsUiStore.getState().handleSetVisualizerMode('sonnet');
+    it('enters Sonnet directly without an interstitial confirmation', () => {
+        useVisualizerSettingsStore.getState().handleSetVisualizerMode('sonnet');
 
-        expect(useSettingsUiStore.getState().visualizerMode).toBe('classic');
-        expect(useSettingsUiStore.getState().sonnetPerformanceWarningOpen).toBe(true);
-
-        useSettingsUiStore.getState().handleSetSonnetPerformanceWarningDontShowAgain(true);
-        useSettingsUiStore.getState().handleConfirmSonnetPerformanceWarning();
-
-        expect(useSettingsUiStore.getState().visualizerMode).toBe('sonnet');
-        expect(useSettingsUiStore.getState().sonnetPerformanceWarningOpen).toBe(false);
-        expect(storage.getItem('sonnet_performance_warning_dismissed')).toBe('true');
-
-        useSettingsUiStore.getState().handleSetVisualizerMode('classic');
-        useSettingsUiStore.getState().handleSetVisualizerMode('sonnet');
-        expect(useSettingsUiStore.getState().visualizerMode).toBe('sonnet');
-        expect(useSettingsUiStore.getState().sonnetPerformanceWarningOpen).toBe(false);
+        expect(useVisualizerSettingsStore.getState().visualizerMode).toBe('sonnet');
+        expect(storage.getItem('visualizer_mode')).toBe('sonnet');
     });
 
     it('allows the stronger lens distortion range without accepting out-of-range values', () => {
-        useSettingsUiStore.getState().handleSetSonnetTuning({ postProcessLensDistortion: 3 });
+        useVisualizerSettingsStore.getState().handleSetSonnetTuning({ postProcessLensDistortion: 3 });
 
-        expect(useSettingsUiStore.getState().sonnetTuning.postProcessLensDistortion).toBe(2);
+        expect(useVisualizerSettingsStore.getState().sonnetTuning.postProcessLensDistortion).toBe(2);
     });
 });
